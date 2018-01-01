@@ -113,7 +113,15 @@ awk '
         clear_comments();
      }
  }
+ 
+ function get_access_constrol_description(access_control){
+ 
+    if (access_control == 0) ac = "private";
+    else if (access_control == 1) ac = "protected";
+    else ac = "public";
 
+    return ac;
+ }
 
  BEGIN {
     comment_for_class = 1;
@@ -134,7 +142,7 @@ awk '
  # extract comments // style
  /^\/\//{
     if (comment_for_copyright != 1) {
-        system("echo " "\"    "  $0  "\"" " >> " comments);
+        system("echo " "\""  $0  "\"" " >> " comments);
         is_multiline_comment = 0;
     } else {
         system("echo " "\""  $0  "\"" " >> " copyright);
@@ -144,7 +152,7 @@ awk '
 
  # sigle-line /**/ style comment
  /^\/\*/ && /\*\//{
-    system("echo " "\"    "  $0  "\"" " >> " comments);
+    system("echo " "\""  $0  "\"" " >> " comments);
     is_multiline_comment = 0;
     next
  }
@@ -200,6 +208,9 @@ awk '
     write_comments_to(class_variables, is_multiline_comment);
 
     system("echo " "\""  $0  "\"" " >> " class_variables);
+    # add a blank line between two class variable decalration
+    system("echo " " >> " class_variables);
+
     next 
  }
   
@@ -208,12 +219,10 @@ awk '
 
     class_func_num++;
 
-    if (access_control == 0) ac = "private";
-    else if (access_control == 1) ac = "protected";
-    else  ac = "public";
-
     write_comments_to(class_funcs_decl, is_multiline_comment);
     
+    ac = get_access_constrol_description(access_control);
+
     # class_funcs_decl used in header file and class_funcs used in source file
     system("echo " "\"" ac  "\" "  "\""  $0  "\""  " >> " class_funcs_decl);
     system("echo "  ">> " class_funcs_decl);
@@ -337,7 +346,6 @@ echo "void ${lowercase_self}_register(void);"
 
 
 
-
 ###
 ### 
 ###
@@ -352,7 +360,8 @@ then
    echo ""
    # tackle file declaration according access control keyword: if it is "private"
    # or "protected" then just remove keyword and leave "static" as it is.Otherwise
-   # remove both access control keyword "public" and "static" 
+   # remove both access control keyword "public" and "static".
+   #TODO maybe there are more case to be dealt with
    sed -i \
        -e 's/private \(.*\)/\1/g' \
        -e 's/protected \(.*\)/\1/g' \
@@ -449,33 +458,53 @@ dos2unix  ${c_header}  >&/dev/null
 exec 1>&${saved_stdout}
 
 
-
+####TODO
+if [ ! -e ${self}.cpp ];
+then
+    echo "Waning: not process ${self}.cpp"
+    exit 0
+fi
 
 
 # keep the header part of the source file, this method presume that the source
 # file has the following layout:
 # 1. copyright information
 # 2. include headers
-# 3. optional static data 
+# 3. optional static data initialization
 # 4. methods definition
 # the header part is 1, 2 and 3.
-rm -f sfhpfile
-touch sfhpfile
+rm -f shfile
+touch shfile
 cplusplus_source_file=${self}.cpp
 awk '
   # if reach the first function definiton then we quit
+  # here use .* to match cplusplus method name instead of [a-zA-Z_]+,for
+  # .* is more accurate.
   /::.*\(/{
      exit 0
   }
   
-  system("echo " "\""  $0  "\"" " >> " source_file_header_part);
+  {
+     system("echo " "\""  $0  "\"" " >> " source_file_header_part);
+  }
+' class_name=${self} source_file_header_part=shfile $cplusplus_source_file 
 
-' class_name=${self} source_file_header_part=sfhpfile $cplusplus_source_file 
-
+# add double quotes for #include marcos in shfile
+# #include "../GeneralInclude/CompilerSwitches.h^M"
+# to remove ^M we need doing the following convertion
+dos2unix shfile>&/dev/null
+sed -i 's/\(#include\) *\(.*\)/\1 \"\2\"/g' shfile
 
 # file includes cplusplus source file and inline header if exists. 
 touch mixed_file
-cat ${self}_inl.h ${cplusplus_source_file} > mixed_file
+if [ -e ${self}_inl.h ];
+then
+    cat ${self}_inl.h ${cplusplus_source_file} > mixed_file
+else  
+    cat ${cplusplus_source_file} > mixed_file
+fi
+
+
 
 ###
 ### 
@@ -487,12 +516,56 @@ touch ${c_source_file}
 exec {saved_stdout}>&1
 exec {c_source_file_fd}>${c_source_file} 1>&${c_source_file_fd}
 
-# header part of souce
-cat sfhpfile
+has_class_var_init=$(awk '
+                    !/\/\// && !/\*/ && /=/{
+                         print "yes"
+                         exit 0
+                    }' shfile)
 
 
+# if there are class variable initialization, then extract them and
+# add corresponding initial value to the cvfile
+if [ $has_class_var_init == "yes" ];
+then
+    rm -f cvilist
+    touch cvilist
 
-exec 1>&${saved_stdout}
+    # extract class variable initialization to cvilist, in the form of 
+    # "varname=init_valule"
+    sed -n 's/.*::\([a-zA-Z_]\+\) *= *\([0-9a-zA-Z_]\+\) *;/\1=\2/gp' shfile > cvilist
+    ####TODO why need dos2unix
+    ####without doing conversion ";varname = init_value"
+    ####"varname = init_value;" is the answer
+    dos2unix cvilist>&/dev/null
+
+    # add initial value of class variable to cvfile
+    while read line;
+    do
+        varname=${line%=*} 
+        # varname=$(sed -n "s/\(.*\)=\(.*\)/\2/p <<<$line")
+
+        init_value=${line#*=}
+        # init_value=$(sed -n "s/$varname=\(.*\)/\1/gp" cvilist) 
+
+        sed -i "s/$varname;/$varname = $init_value;/g" cvfile
+    done <cvilist
+fi
+
+# header part of source file
+sed -i '/::/d' shfile
+cat shfile
+
+if [ -s cvfile ];
+then
+    echo "///////////////////////////////////////////////////////////////////////////////"
+    echo "//"
+    echo "//                            class data"
+    echo "//"
+    echo "///////////////////////////////////////////////////////////////////////////////"
+    echo ""
+    cat cvfile
+fi
+
 
 function construct_pattern(){
    if [ $# -lt 2 ];
@@ -541,9 +614,21 @@ function extract_function_body(){
             next
         }
 
-        ' pattern="$1" func_body=fbfile my_file 
+        ' pattern="$1" func_body=fbfile mixed_file 
 }
 
+function is_duplicate(){
+   old_line_num=$(cat $1 | wc -l)
+   new_line_num=$(cat $1 | sort | uniq |  wc -l)
+
+   if [ $old_line_num -ne $new_line_num ];
+   then
+       #can't return true or false, numeric argument required
+       return 0;
+   else
+       return 1;
+   fi
+}
 
 ###
 ### process class function 
@@ -556,8 +641,18 @@ function extract_function_body(){
 #   
 #    let i=i+1;
 #done
-sed -n -e 's/[a-zA-Z_\* ]\+ \([a-zA-Z_]\+\)(.*/\1/gp' cffile > cflist
-sed -i  "s/${self}_\([a-zA-Z_]\+\)/\1/g" cflist
+sed -n 's/[a-zA-Z_\* ]\+ \([a-zA-Z_]\+\)(.*/\1/gp' cffile > cflist
+sed -i "s/${self}_\([a-zA-Z_]\+\)/\1/g" cflist
+
+if is_duplicate cflist;
+then
+    exec 1>&${saved_stdout}
+    echo "sorry, there are more than two functions with the same name"
+    echo "dupicate files are the following:"
+    echo "$(cat cflist | sort | uniq -c | sed '/1/d')"
+    exit 1
+fi
+
 
 # remove ; in file including class function declaraton
 sed -i 's/;//g' cffile
@@ -578,7 +673,7 @@ do
     #insert_location=$(sed -n "/FUNCTION_BODY_HERE_$i$/=" cffile)
     insert_location=$(sed -n "/$line/=" cffile)
     line_num=$(cat fbfile | wc -l) 
-    echo $insert_location
+
     ####TODO very important IFS
     IFS=''
     while read line2;
@@ -589,8 +684,13 @@ do
     done < fbfile
 
     let i=i+1;
+
 done <cflist
 
+####TODO here rm cflist
+
 ####TODO why need dos2unix
-dos2unix cffile >&/dev/null
+cat cffile
+
+dos2unix ${c_source_file}>&/dev/null
 

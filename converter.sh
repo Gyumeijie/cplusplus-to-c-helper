@@ -87,6 +87,7 @@ fi
 
 self_class=${self}Class
 parent_class=${parent}Class
+uppercase_parent=$(echo $parent | tr 'a-z' 'A-Z')
 uppercase_self=$(echo $self | tr 'a-z' 'A-Z')
 lowercase_self=$(echo $self | tr 'A-Z' 'a-z')
 
@@ -249,6 +250,9 @@ awk '
     write_comments_to(virtual_funcs_decl, is_multiline_comment);
 
     system("echo " "\"    "  $0  "\"" " >> " virtual_funcs);
+
+    system("echo " "\"    "  $0  "\"" " >> " virtual_funcs_decl);
+    system("echo " " >> " virtual_funcs_decl);
     next
  }
 
@@ -260,6 +264,10 @@ awk '
     write_comments_to(object_methods_decl, is_multiline_comment);
 
     system("echo " "\"    "  $0  "\"" " >> " object_methods);
+
+    system("echo " "\"    "  $0  "\"" " >> " object_methods_decl);
+    system("echo " " >> " object_methods_decl);
+
     next
   }
  
@@ -472,8 +480,14 @@ exec 1>&${saved_stdout}
 ####TODO
 if [ ! -e ${self}.cpp ];
 then
-    echo "Waning: not process ${self}.cpp"
-    exit 0
+    if [ -e ${self}_inl.h ];
+    then
+        echo "touch a blank ${self}.cpp"
+        touch ${self}.cpp
+    else
+        echo "Waning: not process ${self}.cpp"
+        exit 0
+    fi
 fi
 
 
@@ -675,36 +689,46 @@ fi
 # remove ; in file including class function declaraton
 sed -i 's/;//g' cffile
 
-i=1;
-while read line;
-do
-    # pattern may contains spaces, so it is necessary to protect it with 
-    # double quotes
-    extract_function_body "$(construct_pattern ${self} ${line})"
-    
-    #fb=$(cat fbfile)
-    #sed -i "s/$i/$fb/g" cffile
-    #
-    #sed -i "/FUNCTION_BODY_HERE_$i/a\\$fb" cffile
+function append_function_body_to(){
+     if [ $# -lt 2 ];
+     then
+         echo "need two args:$1 list, $2 file"
+         exit 1
+     fi
 
-    #location line-end sign $ is necessary
-    #insert_location=$(sed -n "/FUNCTION_BODY_HERE_$i$/=" cffile)
-    insert_location=$(sed -n "/$line/=" cffile)
-    line_num=$(cat fbfile | wc -l) 
-
-    ####TODO very important IFS
-    IFS=''
-    while read line2;
+    i=1;
+    while read line;
     do
-        ####TODO very important\\$varname
-        sed -i "${insert_location}a\\$line2" cffile
-        let insert_location=insert_location+1
-    done < fbfile
+        # pattern may contains spaces, so it is necessary to protect it with 
+        # double quotes
+        extract_function_body "$(construct_pattern ${self} ${line})"
+    
+        #fb=$(cat fbfile)
+        #sed -i "s/$i/$fb/g" cffile
+        #
+        #sed -i "/FUNCTION_BODY_HERE_$i/a\\$fb" cffile
 
-    let i=i+1;
+        #location line-end sign $ is necessary
+        #insert_location=$(sed -n "/FUNCTION_BODY_HERE_$i$/=" cffile)
+        insert_location=$(sed -n "/$line/=" $2)
+        line_num=$(cat fbfile | wc -l) 
 
-done <cflist
+        ####TODO very important IFS
+        IFS=''
+        while read line2;
+        do
+            ####TODO very important\\$varname
+            sed -i "${insert_location}a\\$line2" $2
+            let insert_location=insert_location+1
+        done < fbfile
 
+        let i=i+1;
+
+    done <$1
+}
+
+
+append_function_body_to cflist  cffile
 ####TODO here rm cflist
 
 ####TODO why need dos2unix
@@ -721,6 +745,135 @@ fi
 
 
 
+###
+### non-virtual object methods
+###
 
+function produce_function_header(){
+    if [ $# -lt 1 ];
+    then
+       echo "need file"    
+       exit 1
+    fi
+
+    sed -i \
+        -e 's/(\*\([a-zA-Z_]\+\))/\1/g'\
+        -e 's/^[\t ]\+//g'\
+        -e 's/;//g' $1 
+}
+
+function process_object_method(){
+
+    if [ -s $1dfile ];
+    then
+        rm -f $1list
+        touch $1list
+        sed -e 's/.*(\*\([a-zA-Z_]\+\)).*/\1/g' $1file > $1list 
+        produce_function_header $1file
+    
+        while read line;
+        do
+            func_header=$(sed -n "/$line/p" $1file)
+            sed -i "s/.*$line(.*;/$func_header/g" $1dfile
+        done <$1list
+    
+        append_function_body_to $1list $1dfile
+    
+        if [[ $1 == "om" ]];
+        then
+            kind="non-virtual"
+        else
+            kind="virtual"
+        fi
+        echo "///////////////////////////////////////////////////////////////////////////////"
+        echo "//"
+        echo "//                    ${kind} object methods definition"
+        echo "//"
+        echo "///////////////////////////////////////////////////////////////////////////////"
+        echo ""
+        unset kind   
+
+        cat $1dfile
+    fi
+}
+
+process_object_method "om"
+process_object_method "vf"
+
+
+
+
+###
+###
+###
+
+echo "///////////////////////////////////////////////////////////////////////////////"
+echo "//"
+echo "//                   object constructor and deconstuctor"
+echo "//"
+echo "///////////////////////////////////////////////////////////////////////////////"
+echo ""
+
+echo "static void ${lowercase_self}_instance_init(Object *obj)"
+extract_function_body "$(construct_pattern ${self} ${self})"
+cat fbfile
+
+
+extract_function_body "$(construct_pattern ${self} ~${self})"
+if [ -s fbfile ];
+then
+   echo "static void ${lowercase_self}_instance_fininalize(Object *obj)"
+   cat fbfile
+fi
+echo ""
+
+###
+###
+###
+cat omlist vflist > mergedlist
+echo "///////////////////////////////////////////////////////////////////////////////"
+echo "//"
+echo "//                   binding and type register"
+echo "//"
+echo "///////////////////////////////////////////////////////////////////////////////"
+echo ""
+
+class_name=$(echo "${self_class}" | tr -d 'a-z' | tr 'A-Z' 'a-z')
+
+# class init
+echo "static void ${lowercase_self}_class_init(ObjectClass *oc, void *data)"
+echo "{"
+echo "    ${self_class} *${class_name} = ${uppercase_self}_Class(oc);"
+echo ""
+
+while read line;
+do
+    echo "    ${class_name}->$line = $line;"
+done <mergedlist
+rm -f mergedlist
+
+echo "}"
+
+# type infomation
+echo ""
+echo "static const TypeInfo ${lowercase_self}_type_info = {"
+echo "    .name = TYPE_${uppercase_self},"
+echo "    .parent = TYPE_${uppercase_parent},"
+echo "    .instance_size = sizeof(${self}),"
+echo "    .abstract = false,"
+echo "    .class_size = sizeof(${self_class}),"
+echo "    .instance_init = ${lowercase_self}_instance_init," 
+echo "    .class_init = ${lowercase_self}_class_init" 
+echo "}"
+
+#type register
+echo ""
+echo "void ${lowercase_self}_register(void)"
+echo "{"
+echo "    type_register_static(&${lowercase_self}_type_info);"
+echo "}"
+
+#exec 1>&${saved_stdout}
 dos2unix ${c_source_file}>&/dev/null
+
 

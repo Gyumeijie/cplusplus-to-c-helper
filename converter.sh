@@ -27,6 +27,11 @@ then
     mv ${prefix}.h ${prefix}.H
 fi
 
+if [ ! -e ${cplusplus_header} ];
+then
+    echo "File named ${cplusplus_header} does't exist"
+    exit 1
+fi
 
 rm -f hfile ovfile cvfile cffile vffile omfile cfile cmfile ccmfile omdfile \
     cfdfile vfdfile fnsfile
@@ -207,7 +212,10 @@ awk '
  /static/ && /[a-zA-Z_ ]+ \**[a-zA-Z_]+;/{
     write_comments_to(class_variables, is_multiline_comment);
 
-    system("echo " "\""  $0  "\"" " >> " class_variables);
+    ac = get_access_constrol_description(access_control);
+
+    system("echo " "\"" ac  "\" "  "\""  $0  "\""  " >> " class_variables);
+
     # add a blank line between two class variable decalration
     system("echo " " >> " class_variables);
 
@@ -274,6 +282,9 @@ awk '
      next
   }
 
+  {
+      clear_comments();
+  }
  END{
     system("echo V_FUNCTION_NUMBER=" virtual_func_num " >> " func_num_statics);
     system("echo O_METHOD_NUMBER=" object_method_num " >> " func_num_statics);
@@ -525,7 +536,7 @@ has_class_var_init=$(awk '
 
 # if there are class variable initialization, then extract them and
 # add corresponding initial value to the cvfile
-if [ $has_class_var_init == "yes" ];
+if [[  $has_class_var_init == "yes" ]];
 then
     rm -f cvilist
     touch cvilist
@@ -551,9 +562,16 @@ then
     done <cvilist
 fi
 
+
+sed -i \
+    -e 's/private \(.*\)/\1/g' \
+    -e 's/protected static \(.*\)/\1/g' \
+    -e 's/public static \(.*\)/\1/g' cvfile
+
 # header part of source file
 sed -i '/::/d' shfile
 cat shfile
+
 
 if [ -s cvfile ];
 then
@@ -690,7 +708,19 @@ done <cflist
 ####TODO here rm cflist
 
 ####TODO why need dos2unix
-cat cffile
+if [ -s cffile ];
+then
+    echo "///////////////////////////////////////////////////////////////////////////////"
+    echo "//"
+    echo "//                            class  methods definition"
+    echo "//"
+    echo "///////////////////////////////////////////////////////////////////////////////"
+    echo ""
+    cat cffile
+fi
+
+
+
 
 dos2unix ${c_source_file}>&/dev/null
 

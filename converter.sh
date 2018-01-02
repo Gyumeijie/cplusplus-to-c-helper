@@ -11,6 +11,14 @@ then
    exit 1
 fi
 
+
+
+###############################################################################
+#
+#                             preprocess 
+#
+###############################################################################
+
 #change the suffix of cplusplus header to .H
 cplusplus_header=$1
 prefix=${cplusplus_header%.*}
@@ -33,15 +41,14 @@ then
     exit 1
 fi
 
-rm -f hfile ovfile cvfile cffile vffile omfile cfile cmfile ccmfile omdfile \
-    cfdfile vfdfile fnsfile
 
-touch hfile ovfile cvfile cffile vffile omfile cfile cmfile ccmfile omdfile \
-    cfdfile vfdfile fnsfile
+
+
 
 ###
 ### format the cplusplus header file
 ###
+
 sed 's/^[\t ]\+//g' ${cplusplus_header} > formatted_file 
 
 # escape all double quotes to prevent unterminal string error in awk
@@ -57,9 +64,15 @@ sed -i 's/\([a-zA-Z_]\+\)\(\**\) \([a-zA-Z_]\+\);/\1 \2\3;/g' formatted_file
 
 
 
+
+
 ###
-###extract the class itself name and parent name if exist
+### extract the class itself name and parent name if exist
 ###
+
+# for the cplusplus souce file only has single inheritance, and the qemu object
+# model only support single inheritance in this way (multi inheritance can be
+# do by using interfaces in qemu), we here just tackle this case.
 awk_stdout=$(awk '
    # the class has parent
    /^class/ && /\:/{
@@ -93,9 +106,15 @@ lowercase_self=$(echo $self | tr 'A-Z' 'a-z')
 
 
 
+
+
 ###
 ### extract parts to corresponding files for later use
 ###
+
+touch hfile ovfile cvfile cffile vffile omfile cfile cmfile ccmfile omdfile \
+    cfdfile vfdfile fnsfile
+
 awk '
 
  function clear_comments() {
@@ -253,6 +272,7 @@ awk '
 
     system("echo " "\"    "  $0  "\"" " >> " virtual_funcs_decl);
     system("echo " " >> " virtual_funcs_decl);
+
     next
  }
 
@@ -293,11 +313,12 @@ awk '
   {
       clear_comments();
   }
- END{
-    system("echo V_FUNCTION_NUMBER=" virtual_func_num " >> " func_num_statics);
-    system("echo O_METHOD_NUMBER=" object_method_num " >> " func_num_statics);
-    system("echo C_FUNCTION_NUMBER=" class_func_num " >> " func_num_statics);
- }
+
+  END{
+     system("echo V_FUNCTION_NUMBER=" virtual_func_num " >> " func_num_statics);
+     system("echo O_METHOD_NUMBER=" object_method_num " >> " func_num_statics);
+     system("echo C_FUNCTION_NUMBER=" class_func_num " >> " func_num_statics);
+  }
 
 ' includes=hfile object_variables=ovfile  class_funcs=cffile \
   virtual_funcs=vffile class_variables=cvfile object_methods=omfile \
@@ -306,17 +327,30 @@ awk '
   object_methods_decl=omdfile func_num_statics=fnsfile\
   class_name="${self}"  formatted_file \
  
-
-# we can safely remove formatted_file 
+# we can safely remove formatted_file.
 rm -f formatted_file
 
-#set output c header name
+# cat the fnsfile to show the number of function 
+# cat fnsfile
+
+
+
+
+###############################################################################
+#
+#                             generate .h file
+#
+###############################################################################
+
+#set c header name
 c_header=${self}.h
 echo "c_header is $c_header"
 
 # save the original stdout for later restoration
-exec  {saved_stdout}>&1
+exec {saved_stdout}>&1
 exec {c_header_fd}>${c_header} 1>&${c_header_fd}
+
+
 
 
 
@@ -324,6 +358,7 @@ exec {c_header_fd}>${c_header} 1>&${c_header_fd}
 ### emit copyright info
 ###
 cat cfile
+
 
 
 
@@ -338,6 +373,7 @@ echo "#define ${uppercase_self}_H"
 
 
 
+
 echo -e "\n"
 ###
 ### emit included header
@@ -348,9 +384,10 @@ echo "#include \"../Qom/object.h\""
 
 
 
+
 echo -e "\n"
 ###
-### emit class comments
+### emit class comments 
 ###
 if [ -s ccmfile ];
 then
@@ -365,8 +402,10 @@ echo "void ${lowercase_self}_register(void);"
 
 
 
+
+
 ###
-### 
+###  process class method declaration
 ###
 if [ -s cfdfile ];
 then
@@ -395,6 +434,7 @@ fi
 
 
 
+
 echo -e "\n"
 ###
 ### define the object struct
@@ -416,12 +456,11 @@ echo "} $self;"
 
 
 
+
 echo -e "\n"
 ###
 ### define the class struct
 ###
-echo "typedef struct $self_class {"
-echo -e "    $parent_class parent_class;\n"
 
 # tackle const pure virtual functon
 # tackle non-const pure virtual function
@@ -435,16 +474,23 @@ sed -i \
     -e 's/\([a-zA-Z_]\+\)\(\**\) \([a-zA-Z_]\+\)(/\1\2 (*\3)(Object *obj, /g'  \
     -e 's/, \+void)/)/g' vffile omfile
 
-# tackle non virtual object method: remove constructor and destructor
+# tackle non-virtual object method: remove constructor and destructor
+# here we just distiguish constructor and destructor between other non-virtual
+# object method.
 sed -i -e "/${self}(/d" -e '/^$/d' omfile
 
-# tackle virtual object methods: remove virtual keyword
+# tackle virtual object methods: remove virtual keyword.
 sed -i 's/virtual \+//g' vffile
+
+echo "typedef struct $self_class {"
+echo -e "    $parent_class parent_class;\n"
 
 cat omfile
 echo ""
+
 cat vffile
 echo "} $self_class;"
+
 
 
 
@@ -465,31 +511,58 @@ echo "#define ${uppercase_self}(obj) \\
 
 
 
+
 echo -e "\n"
 ###
-###  postprocess
+###  postprocess for ${self}.h file
 ###
+
 echo "#endif"
 dos2unix  ${c_header}  >&/dev/null
 
 
-### restore stdout
-exec 1>&${saved_stdout}
 
 
-####TODO
+###############################################################################
+#
+#                             generate .c file
+#
+###############################################################################
+
+# check the existence of source file and/or inline header file.
 if [ ! -e ${self}.cpp ];
 then
     if [ -e ${self}_inl.h ];
     then
-        echo "touch a blank ${self}.cpp"
-        touch ${self}.cpp
+        echo "mv ${self}_inl.h to ${self}.cpp"
+
+        # if there is no .cpp file exist, then we treat _inl.h as .cpp file.
+        mv ${self}_inl.h ${self}.cpp
+        
+        # remove header protection macros.
+        sed -i \
+            -e '/#ifndef/d'\
+            -e '/#define/d'\
+            -e '/#endif/d' ${self}.cpp
+           
+        # update file name to ${self}.cpp in copyright information.
+        sed -i \
+            "s/${self}_inl.h/${self}.c (from ${self}_inl.h file)/g" ${self}.cpp
+        
+        is_cpp_from_inline="yes"
     else
-        echo "Waning: not process ${self}.cpp"
-        exit 0
+        echo "Waning: there is no ${self}.cpp and ${self}_inl.h"
+        exit 1
     fi
 fi
 
+
+
+
+
+###
+### header part of source file
+###
 
 # keep the header part of the source file, this method presume that the source
 # file has the following layout:
@@ -498,9 +571,9 @@ fi
 # 3. optional static data initialization
 # 4. methods definition
 # the header part is 1, 2 and 3.
-rm -f shfile
 touch shfile
 cplusplus_source_file=${self}.cpp
+
 awk '
   # if reach the first function definiton then we quit
   # here use .* to match cplusplus method name instead of [a-zA-Z_]+,for
@@ -512,15 +585,22 @@ awk '
   {
      system("echo " "\""  $0  "\"" " >> " source_file_header_part);
   }
+
 ' class_name=${self} source_file_header_part=shfile $cplusplus_source_file 
 
 # add double quotes for #include marcos in shfile
-# #include "../GeneralInclude/CompilerSwitches.h^M"
-# to remove ^M we need doing the following convertion
+# #include "../GeneralInclude/CompilerSwitches.h^M", to remove ^M we need 
+# doing the following convertion
 dos2unix shfile>&/dev/null
+
+# add double quotes for included file, for process above the double quotes lost.
 sed -i 's/\(#include\) *\(.*\)/\1 \"\2\"/g' shfile
 
-# file includes cplusplus source file and inline header if exists. 
+# update file name in copyright information 
+sed -i "s/${self}.cpp/${self}.c/g" shfile
+
+# file includes cplusplus source file and inline header if exists, mixed file
+# mainly contains class data initialization and/or method definition.
 touch mixed_file
 if [ -e ${self}_inl.h ];
 then
@@ -530,10 +610,6 @@ else
 fi
 
 
-
-###
-### 
-###
 c_source_file=${self}.c
 rm -f ${c_source_file}
 touch ${c_source_file}
@@ -541,60 +617,72 @@ touch ${c_source_file}
 exec {saved_stdout}>&1
 exec {c_source_file_fd}>${c_source_file} 1>&${c_source_file_fd}
 
-has_class_var_init=$(awk '
-                    !/\/\// && !/\*/ && /=/{
-                         print "yes"
-                         exit 0
-                    }' shfile)
-
-
-# if there are class variable initialization, then extract them and
-# add corresponding initial value to the cvfile
-if [[  $has_class_var_init == "yes" ]];
-then
-    rm -f cvilist
-    touch cvilist
-
-    # extract class variable initialization to cvilist, in the form of 
-    # "varname=init_valule"
-    sed -n 's/.*::\([a-zA-Z_]\+\) *= *\([0-9a-zA-Z_]\+\) *;/\1=\2/gp' shfile > cvilist
-    ####TODO why need dos2unix
-    ####without doing conversion ";varname = init_value"
-    ####"varname = init_value;" is the answer
-    dos2unix cvilist>&/dev/null
-
-    # add initial value of class variable to cvfile
-    while read line;
-    do
-        varname=${line%=*} 
-        # varname=$(sed -n "s/\(.*\)=\(.*\)/\2/p <<<$line")
-
-        init_value=${line#*=}
-        # init_value=$(sed -n "s/$varname=\(.*\)/\1/gp" cvilist) 
-
-        sed -i "s/$varname;/$varname = $init_value;/g" cvfile
-    done <cvilist
-fi
-
-
-sed -i \
-    -e 's/private \(.*\)/\1/g' \
-    -e 's/protected static \(.*\)/\1/g' \
-    -e 's/public static \(.*\)/\1/g' cvfile
-
-# header part of source file
+# remove the class data initialization in source file, for them lost access
+# control information: we have know idea about which data has private, protected
+# or public access; and we have cvfile, which includes such information.
 sed -i '/::/d' shfile
 cat shfile
 
 
+
+
+
+###
+###  process class data 
+###
+
 if [ -s cvfile ];
 then
+
+    has_class_var_init=$(awk '
+                        !/\/\// && !/\*/ && /=/{
+                             print "yes"
+                             exit 0
+                        }' shfile)
+    
+    
+    # if there are class variable initialization, then extract them and
+    # add corresponding initial value to the cvfile.
+    if [[  $has_class_var_init == "yes" ]];
+    then
+        rm -f cvilist
+        touch cvilist
+    
+        # extract class variable initialization to cvilist, in the form of 
+        # "varname=init_valule".
+        sed -n 's/.*::\([a-zA-Z_]\+\) *= *\([0-9a-zA-Z_]\+\) *;/\1=\2/gp' shfile > cvilist
+    
+        # without doing conversion ";varname = init_value";
+        # "varname = init_value;" is the answer.
+        dos2unix cvilist>&/dev/null
+    
+        # add initial value of class variable to cvfile.
+        while read line;
+        do
+            varname=${line%=*} 
+            # varname=$(sed -n "s/\(.*\)=\(.*\)/\2/p <<<$line")
+    
+            init_value=${line#*=}
+            # init_value=$(sed -n "s/$varname=\(.*\)/\1/gp" cvilist) 
+    
+            sed -i "s/$varname;/$varname = $init_value;/g" cvfile
+        done < cvilist
+    fi
+    
+    
+    sed -i \
+        -e 's/private \(.*\)/\1/g' \
+        -e 's/protected static \(.*\)/\1/g' \
+        -e 's/public static \(.*\)/\1/g' cvfile
+    
+    
     echo "///////////////////////////////////////////////////////////////////////////////"
     echo "//"
     echo "//                            class data"
     echo "//"
     echo "///////////////////////////////////////////////////////////////////////////////"
     echo ""
+
     cat cvfile
 fi
 
@@ -609,11 +697,24 @@ function construct_pattern(){
    echo "$1::$2 *\("
 }
 
+
 # extact function body of a given name function
-####TODO awk ' 'x should have a space after the closing'
 function extract_function_body(){
+
+   if [ $# -lt 1 ];
+   then
+       echo "a function name is required for extracting it's body."
+       exit 1
+   fi
+
+   # here we don't use echo "" > file to clear the previous content in the file
+   # for it will bring an unwanted newline.
    rm -f fbfile
    touch fbfile
+
+   # the main idea is finding the function which matchs a pattern first, then 
+   # we output the body to the func_body file, until we meet the function end
+   # tag "}".
    awk '
        BEGIN{
            is_function_body = 0;
@@ -623,19 +724,21 @@ function extract_function_body(){
            next 
        }
 
+       # find the function 
        $0~pattern{ 
            system("echo " "\"{"  "\"" " >> " func_body);
            is_function_body = 1; 
            next
        }
 
-       # assume the end of function "}" is at the begin of line
+       # assume the end of function "}" is at the begin of line, this can be
+       # guaranteed in preprocess phase or we can do ourselves.
        /^\}/ {
            if (is_function_body == 0){
                next
            }else{ 
-              system("echo " "\"}"  "\"" " >> " func_body);
-              exit 0
+               system("echo " "\"}"  "\"" " >> " func_body);
+               exit 0
            }
         }
 
@@ -646,39 +749,48 @@ function extract_function_body(){
             next
         }
 
-        ' pattern="$1" func_body=fbfile mixed_file 
+  ' pattern="$1" func_body=fbfile mixed_file 
 }
 
+
 function is_duplicate(){
+    
+   if [ $# -lt 1 ];
+   then
+       echo "a file to check duplicate is need."
+       exit 1
+   fi
+
    old_line_num=$(cat $1 | wc -l)
    new_line_num=$(cat $1 | sort | uniq |  wc -l)
 
    if [ $old_line_num -ne $new_line_num ];
    then
-       #can't return true or false, numeric argument required
+       # can't return true or false, numeric argument required
        return 0;
    else
        return 1;
    fi
 }
 
+
+
+
+
+echo -e "\n"
 ###
 ### process class function 
 ### 
-#class_func_num=$(sed -n 's/C_FUNCTION_NUMBER=\([0-9]\+\)/\1/gp' fnsfile)
-#echo ${class_func_num}
-#i=1
-#while [ $i -le $class_func_num ];
-#do 
-#   
-#    let i=i+1;
-#done
+
+# generate a list of class function name prefixed without ${self}_
 sed -n 's/[a-zA-Z_\* ]\+ \([a-zA-Z_]\+\)(.*/\1/gp' cffile > cflist
 sed -i "s/${self}_\([a-zA-Z_]\+\)/\1/g" cflist
 
 if is_duplicate cflist;
 then
+    # restore stdout for outputing error message
     exec 1>&${saved_stdout}
+
     echo "sorry, there are more than two functions with the same name"
     echo "dupicate files are the following:"
     echo "$(cat cflist | sort | uniq -c | sed '/1/d')"
@@ -687,51 +799,52 @@ fi
 
 
 # remove ; in file including class function declaraton
+# function_header(); ---> function_header()
 sed -i 's/;//g' cffile
 
 function append_function_body_to(){
-     if [ $# -lt 2 ];
-     then
-         echo "need two args:$1 list, $2 file"
-         exit 1
-     fi
+
+    if [ $# -lt 2 ];
+    then
+        echo "need two args:$1 for a list of function name and  $2 for a file"
+        echo "including function declarations."
+        exit 1
+    fi
+
+    # for better understanding, we rename $1 and $2
+    func_list_file=$1
+    func_decl_file=$2 
 
     i=1;
-    while read line;
+    while read func_name_line;
     do
         # pattern may contains spaces, so it is necessary to protect it with 
-        # double quotes
-        extract_function_body "$(construct_pattern ${self} ${line})"
+        # double quotes.
+        extract_function_body "$(construct_pattern ${self} ${func_name_line})"
     
-        #fb=$(cat fbfile)
-        #sed -i "s/$i/$fb/g" cffile
-        #
-        #sed -i "/FUNCTION_BODY_HERE_$i/a\\$fb" cffile
+        # get the line number where line matchs the function name.
+        insert_location=$(sed -n "/$func_name_line/=" ${func_decl_file})
 
-        #location line-end sign $ is necessary
-        #insert_location=$(sed -n "/FUNCTION_BODY_HERE_$i$/=" cffile)
-        insert_location=$(sed -n "/$line/=" $2)
-        line_num=$(cat fbfile | wc -l) 
-
-        ####TODO very important IFS
         IFS=''
-        while read line2;
+        # append function body in fbfile line by line below the corresponding
+        # function declaration line in func_decl_file.
+        while read func_decl_line;
         do
-            ####TODO very important\\$varname
-            sed -i "${insert_location}a\\$line2" $2
+            sed -i "${insert_location}a\\${func_decl_line}" ${func_decl_file}
+
+            # update the next line number to append function body line.
             let insert_location=insert_location+1
+
         done < fbfile
 
+        # process the next function, according to it's name in func_list_file.
         let i=i+1;
 
-    done <$1
+    done < ${func_list_file}
 }
 
-
 append_function_body_to cflist  cffile
-####TODO here rm cflist
 
-####TODO why need dos2unix
 if [ -s cffile ];
 then
     echo "///////////////////////////////////////////////////////////////////////////////"
@@ -745,54 +858,82 @@ fi
 
 
 
+
+
+echo -e "\n"
 ###
-### non-virtual object methods
+### process object methods (virtual and normal object methods)
 ###
 
 function produce_function_header(){
+
     if [ $# -lt 1 ];
     then
-       echo "need file"    
+       echo "need file include function declaration."    
        exit 1
     fi
 
+    # the orignal form in omfile or vffile is "return_type (*func_name)(para_list);"
+    # they are list of function pointers, which are used in ${self_class} struct. 
+    # the following steps are taken to generate function header based on function
+    # pointers declaration above:
+    # 1 remove (* )
+    # 2 remove leading whitespace(s)
+    # 3 remove ;
+    # the result form: return_type func_name(para_list)
     sed -i \
         -e 's/(\*\([a-zA-Z_]\+\))/\1/g'\
         -e 's/^[\t ]\+//g'\
         -e 's/;//g' $1 
+
 }
 
+
+# for object methods, we don't place their comments into ${self_class} struct
+# in .h file, because doing this will make struct unreadable; so we place those
+# comments in .c file; these comments with their corresponding method declaration
+# are kept in xxdfile, like omdfile or vfdfile. By the way omfile and vffile are
+# just keep methods declaration, not with comments.
 function process_object_method(){
 
     if [ -s $1dfile ];
     then
         rm -f $1list
         touch $1list
+
+        # generate function name list from omfile or vffile.
         sed -e 's/.*(\*\([a-zA-Z_]\+\)).*/\1/g' $1file > $1list 
+
         produce_function_header $1file
     
         while read line;
         do
             func_header=$(sed -n "/$line/p" $1file)
+
+            # 
             sed -i "s/.*$line(.*;/$func_header/g" $1dfile
-        done <$1list
+
+        done < $1list
     
         append_function_body_to $1list $1dfile
     
         if [[ $1 == "om" ]];
         then
-            kind="non-virtual"
+            method_kind="non-virtual"
         else
-            kind="virtual"
+            method_kind="virtual"
         fi
+
+        echo -e "\n"
         echo "///////////////////////////////////////////////////////////////////////////////"
         echo "//"
-        echo "//                    ${kind} object methods definition"
+        echo "//                    ${method_kind} object methods definition"
         echo "//"
         echo "///////////////////////////////////////////////////////////////////////////////"
         echo ""
         unset kind   
 
+        dos2unix $1dfile>&/dev/null
         cat $1dfile
     fi
 }
@@ -803,22 +944,25 @@ process_object_method "vf"
 
 
 
+
+echo -e "\n"
 ###
-###
+###  process constructor and destructor 
 ###
 
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo "//"
-echo "//                   object constructor and deconstuctor"
+echo "//                   object constructor and destructor"
 echo "//"
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo ""
 
+# constructor
 echo "static void ${lowercase_self}_instance_init(Object *obj)"
 extract_function_body "$(construct_pattern ${self} ${self})"
 cat fbfile
 
-
+# destructor, this is optional
 extract_function_body "$(construct_pattern ${self} ~${self})"
 if [ -s fbfile ];
 then
@@ -827,13 +971,21 @@ then
 fi
 echo ""
 
+
+
+
+
+echo -e "\n"
 ###
+###   process binding and type registration 
 ###
-###
+
 cat omlist vflist > mergedlist
+
+
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo "//"
-echo "//                   binding and type register"
+echo "//                   binding and type registration"
 echo "//"
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo ""
@@ -846,15 +998,16 @@ echo "{"
 echo "    ${self_class} *${class_name} = ${uppercase_self}_Class(oc);"
 echo ""
 
-while read line;
+# add a list of bindings
+while read func_name_line;
 do
-    echo "    ${class_name}->$line = $line;"
-done <mergedlist
-rm -f mergedlist
+    echo "    ${class_name}->${func_name_line} = ${func_name_line};"
+
+done < mergedlist
 
 echo "}"
 
-# type infomation
+# type information
 echo ""
 echo "static const TypeInfo ${lowercase_self}_type_info = {"
 echo "    .name = TYPE_${uppercase_self},"
@@ -866,14 +1019,21 @@ echo "    .instance_init = ${lowercase_self}_instance_init,"
 echo "    .class_init = ${lowercase_self}_class_init" 
 echo "}"
 
-#type register
+#type registration
 echo ""
 echo "void ${lowercase_self}_register(void)"
 echo "{"
 echo "    type_register_static(&${lowercase_self}_type_info);"
 echo "}"
 
-#exec 1>&${saved_stdout}
+
+
+
+
+###
+### postprocess for .c file
+###
 dos2unix ${c_source_file}>&/dev/null
 
+rm -f *file *list 
 

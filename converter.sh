@@ -62,8 +62,8 @@ sed -i 's/()/(void)/g' formatted_file
 # to "int **i;"
 sed -i 's/\([a-zA-Z_]\+\)\(\**\) \([a-zA-Z_]\+\);/\1 \2\3;/g' formatted_file
 
-
-
+# remove whitespace(s) between function name and (
+sed -i 's/\([a-zA-Z_]\+\) *(/\1(/g' formatted_file 
 
 
 ###
@@ -247,17 +247,15 @@ awk '
 
     class_func_num++;
 
-    write_comments_to(class_funcs_decl, is_multiline_comment);
-    
     ac = get_access_constrol_description(access_control);
 
-    # class_funcs_decl used in header file and class_funcs used in source file
+    system("echo " "\"" ac  "\" "  "\""  $0  "\""  " >> " class_funcs);
+    system("echo " " >> " class_funcs);
+
+    write_comments_to(class_funcs_decl, is_multiline_comment);
     system("echo " "\"" ac  "\" "  "\""  $0  "\""  " >> " class_funcs_decl);
     system("echo "  ">> " class_funcs_decl);
 
-    system("echo " "\"" ac  "\" "  "\""  $0  "\""  " >> " class_funcs);
-    #system("echo FUNCTION_BODY_HERE_" class_func_num " >> " class_funcs);
-    system("echo " " >> " class_funcs);
 
     next
  }
@@ -266,10 +264,9 @@ awk '
  /virtual/{
     virtual_func_num++;
 
-    write_comments_to(virtual_funcs_decl, is_multiline_comment);
-
     system("echo " "\"    "  $0  "\"" " >> " virtual_funcs);
 
+    write_comments_to(virtual_funcs_decl, is_multiline_comment);
     system("echo " "\"    "  $0  "\"" " >> " virtual_funcs_decl);
     system("echo " " >> " virtual_funcs_decl);
 
@@ -281,10 +278,10 @@ awk '
  /[a-zA-Z_] *\(/ && $0 !~ class_name{
     object_method_num++;
 
-    write_comments_to(object_methods_decl, is_multiline_comment);
-
+    print $0
     system("echo " "\"    "  $0  "\"" " >> " object_methods);
 
+    write_comments_to(object_methods_decl, is_multiline_comment);
     system("echo " "\"    "  $0  "\"" " >> " object_methods_decl);
     system("echo " " >> " object_methods_decl);
 
@@ -468,10 +465,10 @@ echo -e "\n"
 # tackle non-const function
 # tackle void: (void)--->([const]Object *obj, void)--->([const]Object *obj)
 sed -i \
-    -e 's/\([a-zA-Z_]\+\)\(\**\) \([a-zA-Z_]\+\)(\(.*\) const = 0;/\1\2 (*\3)(const Object *obj, \4;/g' \
-    -e 's/\([a-zA-Z_]\+\)\(\**\) \([a-zA-Z_]\+\)(\(.*\) = 0;/\1\2 (*\3)(const Object *obj, \4;/g' \
-    -e 's/\([a-zA-Z_]\+\)\(\**\) \([a-zA-Z_]\+\)(\(.*\) const;/\1\2 (*\3)(const Object *obj, \4;/g' \
-    -e 's/\([a-zA-Z_]\+\)\(\**\) \([a-zA-Z_]\+\)(/\1\2 (*\3)(Object *obj, /g'  \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *const *= *0 *;/\1\2 (*\3)(const Object *obj, \4;/g' \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *= *0 *;/\1\2 (*\3)(Object *obj, \4;/g' \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *const *;/\1\2 (*\3)(const Object *obj, \4;/g' \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *;/\1\2 (*\3)(Object *obj, \4/g'  \
     -e 's/, \+void)/)/g' vffile omfile
 
 # tackle non-virtual object method: remove constructor and destructor
@@ -518,7 +515,10 @@ echo -e "\n"
 ###
 
 echo "#endif"
-dos2unix  ${c_header}  >&/dev/null
+dos2unix  ${c_header} >&/dev/null
+
+exec 1>&${saved_stdout}
+
 
 
 
@@ -528,6 +528,71 @@ dos2unix  ${c_header}  >&/dev/null
 #                             generate .c file
 #
 ###############################################################################
+
+function produce_function_header(){
+
+    if [ $# -lt 1 ];
+    then
+       echo "need file include function declaration."    
+       exit 1
+    fi
+
+    # the orignal form in omfile or vffile is "return_type (*func_name)(para_list);"
+    # they are list of function pointers, which are used in ${self_class} struct. 
+    # the following steps are taken to generate function header based on function
+    # pointers declaration above:
+    # 1 remove (* )
+    # 2 remove leading whitespace(s)
+    # 3 remove ;
+    # the result form: return_type func_name(para_list)
+    sed -i \
+        -e 's/(\*\([a-zA-Z_]\+\))/\1/g'\
+        -e 's/^[\t ]\+//g'\
+        -e 's/;//g' $1 
+
+}
+
+
+function generate_source_file(){
+
+    touch ${self}.cpp
+    exec {saved_stdout}>&1
+    exec {temp_fd}>${self}.cpp 1>&${temp_fd}
+
+    # add copyright information
+    echo "//" 
+    echo "// Copyright 2004 P&P Software GmbH - All Rights Reserved"
+    echo "//"
+    echo "// ${self}.c (generated from ${self}.h)"
+    echo "//"
+    echo "// Version	1.0"
+    echo "// Date		12.09.02"
+    echo "// Author	A. Pasetti (P&P Software)"
+    
+    # add include file
+    echo ""
+    echo -e "#include \"${self}.h\"\n"
+
+    cp vffile tempfile
+
+    produce_function_header tempfile 
+
+    # add blank function body
+    sed -i \
+        -e 's/)/){\n\n}/g' \
+        -e "s/\([a-zA-Z_]\+\)(/${self}::\1(/g" tempfile
+
+    # add constructor
+    echo -e "${self}::${self}(void){\n\n}" >> tempfile
+
+    cat tempfile
+    rm -f tempfile
+
+    exec 1>&${saved_stdout}
+
+}
+
+
 
 # check the existence of source file and/or inline header file.
 if [ ! -e ${self}.cpp ];
@@ -551,8 +616,10 @@ then
         
         is_cpp_from_inline="yes"
     else
-        echo "Waning: there is no ${self}.cpp and ${self}_inl.h"
-        exit 1
+        exec 1>&${saved_stdout}
+        echo "Waning: there is no ${self}.cpp and ${self}_inl.h, and we are tring"
+        echo "generating a ${self}.cpp for you."
+        generate_source_file
     fi
 fi
 
@@ -694,6 +761,7 @@ function construct_pattern(){
        exit 1
    fi 
 
+   # return constructed pattern
    echo "$1::$2 *\("
 }
 
@@ -766,10 +834,14 @@ function is_duplicate(){
 
    if [ $old_line_num -ne $new_line_num ];
    then
-       # can't return true or false, numeric argument required
-       return 0;
-   else
-       return 1;
+        # restore stdout for outputing error message
+        exec 1>&${saved_stdout}
+
+        echo "sorry, there are more than two functions with the same name"
+        echo "dupicate files are the following:"
+        echo "$(cat $1 | sort | uniq -c | sed '/1/d')"
+        exit 1
+        # can't return true or false, numeric argument required
    fi
 }
 
@@ -786,16 +858,8 @@ echo -e "\n"
 sed -n 's/[a-zA-Z_\* ]\+ \([a-zA-Z_]\+\)(.*/\1/gp' cffile > cflist
 sed -i "s/${self}_\([a-zA-Z_]\+\)/\1/g" cflist
 
-if is_duplicate cflist;
-then
-    # restore stdout for outputing error message
-    exec 1>&${saved_stdout}
-
-    echo "sorry, there are more than two functions with the same name"
-    echo "dupicate files are the following:"
-    echo "$(cat cflist | sort | uniq -c | sed '/1/d')"
-    exit 1
-fi
+# check whether cflist has duplicate item
+is_duplicate cflist;
 
 
 # remove ; in file including class function declaraton
@@ -821,16 +885,37 @@ function append_function_body_to(){
         # pattern may contains spaces, so it is necessary to protect it with 
         # double quotes.
         extract_function_body "$(construct_pattern ${self} ${func_name_line})"
-    
+
         # get the line number where line matchs the function name.
-        insert_location=$(sed -n "/$func_name_line/=" ${func_decl_file})
+        # until now, xxdfile may contains some function body already appended,
+        # so we must make sure that the substitution not taken place in both 
+        # the comments and the function body, where a function will be matched. 
+        insert_location=$(sed -n "/^[a-zA-Z_][a-zA-Z_\* ]\+$func_name_line(/=" ${func_decl_file})
+
+        # if the above regex expression is not comprehensive, the insert_location
+        # will contain multiple number separated by newline; we should detect it
+        # and come back to revise the regex expression.
+        # by the way if a variable contains newline, like var="1\n2\n", we can 
+        # use [[ $var == *'\n'* ]] to check.
+        if [[ $insert_location == *$'\n'* ]];
+        then
+             exec 1>&${saved_stdout}
+             echo "ambiguous insert_location in ${func_decl_file}:"
+             echo "${insert_location}"
+
+             cat ${func_decl_file} > debug_info
+             rm -f *list *file
+             mv debug_info ${func_decl_file}
+
+             exit 1;
+        fi 
 
         IFS=''
         # append function body in fbfile line by line below the corresponding
         # function declaration line in func_decl_file.
         while read func_decl_line;
         do
-            sed -i "${insert_location}a\\${func_decl_line}" ${func_decl_file}
+            sed -i "${insert_location}a\\\\$func_decl_line" ${func_decl_file}
 
             # update the next line number to append function body line.
             let insert_location=insert_location+1
@@ -865,30 +950,6 @@ echo -e "\n"
 ### process object methods (virtual and normal object methods)
 ###
 
-function produce_function_header(){
-
-    if [ $# -lt 1 ];
-    then
-       echo "need file include function declaration."    
-       exit 1
-    fi
-
-    # the orignal form in omfile or vffile is "return_type (*func_name)(para_list);"
-    # they are list of function pointers, which are used in ${self_class} struct. 
-    # the following steps are taken to generate function header based on function
-    # pointers declaration above:
-    # 1 remove (* )
-    # 2 remove leading whitespace(s)
-    # 3 remove ;
-    # the result form: return_type func_name(para_list)
-    sed -i \
-        -e 's/(\*\([a-zA-Z_]\+\))/\1/g'\
-        -e 's/^[\t ]\+//g'\
-        -e 's/;//g' $1 
-
-}
-
-
 # for object methods, we don't place their comments into ${self_class} struct
 # in .h file, because doing this will make struct unreadable; so we place those
 # comments in .c file; these comments with their corresponding method declaration
@@ -901,16 +962,17 @@ function process_object_method(){
         touch $1list
 
         # generate function name list from omfile or vffile.
-        sed -e 's/.*(\*\([a-zA-Z_]\+\)).*/\1/g' $1file > $1list 
+        sed  's/.*(\*\([a-zA-Z_]\+\)).*/\1/g' $1file > $1list 
 
         produce_function_header $1file
-    
-        while read line;
+        
+        while read func_name;
         do
-            func_header=$(sed -n "/$line/p" $1file)
+           func_header=$(sed -n "/$func_name/p" $1file)
 
-            # 
-            sed -i "s/.*$line(.*;/$func_header/g" $1dfile
+           # until now, xxdfile contains comments and function declaration
+           # so we must make sure the substitution not taken place in the comments.
+           sed -i "s/^[\t ]\+[a-zA-Z_][a-zA-Z_\* ]\+$func_name(.*;/$func_header/g" $1dfile
 
         done < $1list
     
@@ -937,14 +999,20 @@ function process_object_method(){
     fi
 }
 
-if [ -e omfile ];
+if [ -s omfile ];
 then
+    ####todo function with tab
     process_object_method "om"
+    # check whether omlist has duplicate item
+    is_duplicate omlist;
 fi
 
-if [ -e vffile ];
+if [ -s vffile ];
 then
     process_object_method "vf"
+
+    # check whether vflist has duplicate item
+    is_duplicate vflist;
 fi
 
 
@@ -1017,21 +1085,19 @@ parent_class_name=$(echo "${parent_class}" | tr -d 'a-z' | tr 'A-Z' 'a-z')
 # class init
 echo "static void ${lowercase_self}_class_init(ObjectClass *oc, void *data)"
 echo "{"
-echo "    ${self_class} *${self_class_name} = ${uppercase_self}_Class(oc);"
-echo ""
 
-if [ -e vflist ];
+if [ -e omlist ];
 then
-echo "    ${parent_class} *${parent_class_name} = ${uppercase_parent}_Class(oc);"
+    add_bindings omlist ${self_class_name}
+    echo "    ${self_class} *${self_class_name} = ${uppercase_self}_Class(oc);"
+    echo ""
 fi
 
-add_bindings omlist ${self_class_name}
-
-echo ""
 
 if [ -e vflist ];
 then
-    echo "    /*This may not correct, please check yourself.*/"
+    echo "    ${parent_class} *${parent_class_name} = ${uppercase_parent}_Class(oc);"
+    echo "    // This may not correct, please check yourself."
     add_bindings vflist ${parent_class_name}
 fi
 
@@ -1065,5 +1131,5 @@ echo "}"
 ###
 dos2unix ${c_source_file}>&/dev/null
 
-rm -f *file *list 
+#rm -f *file *list 
 

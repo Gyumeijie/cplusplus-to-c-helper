@@ -963,6 +963,9 @@ echo "//"
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo ""
 
+echo "// the following may be useful;if you don't use it, just delete." 
+echo "// ${self} *This = ${uppercase_self}(obj)"
+
 # constructor
 echo "static void ${lowercase_self}_instance_init(Object *obj)"
 extract_function_body "$(construct_pattern ${self} ${self})"

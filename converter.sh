@@ -898,7 +898,6 @@ function process_object_method(){
 
     if [ -s $1dfile ];
     then
-        rm -f $1list
         touch $1list
 
         # generate function name list from omfile or vffile.
@@ -938,8 +937,15 @@ function process_object_method(){
     fi
 }
 
-process_object_method "om"
-process_object_method "vf"
+if [ -e omfile ];
+then
+    process_object_method "om"
+fi
+
+if [ -e vffile ];
+then
+    process_object_method "vf"
+fi
 
 
 
@@ -980,7 +986,19 @@ echo -e "\n"
 ###   process binding and type registration 
 ###
 
-cat omlist vflist > mergedlist
+function add_bindings(){
+    if [ $# -lt 2 ];
+    then
+        echo "need a file includes function name list and class name."
+        exit 1
+    fi
+
+    # add a list of bindings
+    while read func_name_line;
+    do
+       echo "    $2->${func_name_line} = ${func_name_line};"
+    done < $1
+}
 
 
 echo "///////////////////////////////////////////////////////////////////////////////"
@@ -990,20 +1008,29 @@ echo "//"
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo ""
 
-class_name=$(echo "${self_class}" | tr -d 'a-z' | tr 'A-Z' 'a-z')
+self_class_name=$(echo "${self_class}" | tr -d 'a-z' | tr 'A-Z' 'a-z')
+parent_class_name=$(echo "${parent_class}" | tr -d 'a-z' | tr 'A-Z' 'a-z')
 
 # class init
 echo "static void ${lowercase_self}_class_init(ObjectClass *oc, void *data)"
 echo "{"
-echo "    ${self_class} *${class_name} = ${uppercase_self}_Class(oc);"
+echo "    ${self_class} *${self_class_name} = ${uppercase_self}_Class(oc);"
 echo ""
 
-# add a list of bindings
-while read func_name_line;
-do
-    echo "    ${class_name}->${func_name_line} = ${func_name_line};"
+if [ -e vflist ];
+then
+echo "    ${parent_class} *${parent_class_name} = ${uppercase_parent}_Class(oc);"
+fi
 
-done < mergedlist
+add_bindings omlist ${self_class_name}
+
+echo ""
+
+if [ -e vflist ];
+then
+    echo "    /*This may not correct, please check yourself.*/"
+    add_bindings vflist ${parent_class_name}
+fi
 
 echo "}"
 

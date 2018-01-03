@@ -59,11 +59,22 @@ sed -i 's/"/\\"/g' formatted_file
 sed -i 's/()/(void)/g' formatted_file 
 
 # normalize pointer variable declaration, eg "int** i;" will be transformed
-# to "int **i;"
-sed -i 's/\([a-zA-Z_]\+\)\(\**\) \([a-zA-Z_]\+\);/\1 \2\3;/g' formatted_file
+# to "int **i;"; the second expression is to squash space(s), eg "int   i",
+# will be "int i", "int    **i  ;" will be "int **i;"
+# Waring: we can't deal with case like "int**i;", which should be write "int** i;"
+# or "int **i;" and treated as bad coding style, we just ignore it here.
+# we shuold make sure that the substitution not taken place in comments, for 
+# previous preprocess, leading whitespace(s) of all lines in .h file are deleted
+# so we can use ^[^\/] to guarantee that.
+sed -i \
+    -e 's/\(^[^\/][a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_]\+\) *;/\1 \2\3;/g'\
+    -e 's/\(^[^\/][a-zA-Z_][^()\* ]\+\)\( \+\)\(\**\)\([a-zA-Z_]\+\) *;/\1 \3\4;/g'\
+    formatted_file
 
 # remove whitespace(s) between function name and (
 sed -i 's/\([a-zA-Z_]\+\) *(/\1(/g' formatted_file 
+
+
 
 
 ###
@@ -121,6 +132,7 @@ awk '
     system("rm "  comments  " && "  "touch " comments);
  }
 
+ #TODO data mutiline comments should be with indentation
  function write_comments_to(file_to_write, is_multiline_comment){
 
     if (system("test -s "  comments) == 0){
@@ -172,6 +184,7 @@ awk '
     } else {
         system("echo " "\""  $0  "\"" " >> " copyright);
     }
+
     next
  }
 
@@ -220,7 +233,12 @@ awk '
  }
 
  # extract object variables
- !/static/ && /[a-zA-Z_ ]+ \**[a-zA-Z_]+;/{
+ # for previous preprocess on variables, and previous skipping comments in 
+ # this awk we can simply use the following regexp to match variables. By the
+ # way, we can not use "[a-zA-Z_ ]+" for line contains "func_name()  const;"
+ # will matches. for "unsigned int *i;" we just match the "int *i" part, and 
+ # that is enough.
+ !/static/ && /[a-zA-Z_]+ \**[a-zA-Z_]+;/{
     write_comments_to(object_variables, is_multiline_comment);
 
     # with 4 spaces indentation
@@ -229,7 +247,7 @@ awk '
  }
 
  # extract class variables
- /static/ && /[a-zA-Z_ ]+ \**[a-zA-Z_]+;/{
+ /static/ && /[a-zA-Z_]+ \**[a-zA-Z_]+;/{
     write_comments_to(class_variables, is_multiline_comment);
 
     ac = get_access_constrol_description(access_control);
@@ -468,7 +486,7 @@ sed -i \
     -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *const *= *0 *;/\1\2 (*\3)(const Object *obj, \4;/g' \
     -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *= *0 *;/\1\2 (*\3)(Object *obj, \4;/g' \
     -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *const *;/\1\2 (*\3)(const Object *obj, \4;/g' \
-    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *;/\1\2 (*\3)(Object *obj, \4/g'  \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(/\1\2 (*\3)(Object *obj, /g'  \
     -e 's/, \+void)/)/g' vffile omfile
 
 # tackle non-virtual object method: remove constructor and destructor

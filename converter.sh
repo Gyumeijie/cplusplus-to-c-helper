@@ -315,7 +315,6 @@ awk '
  /[a-zA-Z_] *\(/ && $0 !~ class_name{
     object_method_num++;
 
-    print $0
     system("echo " "\"    "  $0  "\"" " >> " object_methods);
 
     write_comments_to(object_methods_decl, is_multiline_comment);
@@ -379,7 +378,6 @@ rm -f formatted_file
 
 #set c header name
 c_header=${self}.h
-echo "c_header is $c_header"
 
 # save the original stdout for later restoration
 exec {saved_stdout}>&1
@@ -503,11 +501,17 @@ echo -e "\n"
 # tackle non-const function
 # tackle void: (void)--->([const]Object *obj, void)--->([const]Object *obj)
 sed -i \
-    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *const *= *0 *;/\1\2 (*\3)(const Object *obj, \4;/g' \
-    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *= *0 *;/\1\2 (*\3)(Object *obj, \4;/g' \
-    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *const *;/\1\2 (*\3)(const Object *obj, \4;/g' \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *const *= *0 *;/\1\2 (*\3)(const Object *obj, \4);/g' \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *= *0 *;/\1\2 (*\3)(Object *obj, \4);/g' \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *const *;/\1\2 (*\3)(const Object *obj, \4);/g' \
     -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(/\1\2 (*\3)(Object *obj, /g'  \
     -e 's/, \+void)/)/g' vffile omfile pvffile
+
+
+sed -i \
+    -e 's/\(.*\)) *;/\1);/g'  \
+    -e 's/ *, */,/g'  \
+    -e 's/,/, /g' vffile omfile pvffile cffile
 
 # tackle non-virtual object method: remove constructor and destructor
 # here we just distiguish constructor and destructor between other non-virtual
@@ -526,10 +530,21 @@ then
     cat omfile
 fi
 
+# for non-pure virtual function, we often have no idea about whether it is
+# in parent class or in self class; but if we know the parent is class, we 
+# can sure that the virtual function should defined in self class.
 if [ -s vffile ];
 then
     echo " "
-    cat vffile
+    
+    if [ ${parent} == "Object" ];
+    then
+        cat vffile
+    else
+        echo ">>> // some function may not be in here, please check youself."
+        cat vffile
+        echo "<<<"
+    fi
 fi
 
 if [ -s pvffile ];
@@ -568,8 +583,8 @@ echo -e "\n"
 
 echo "#endif"
 dos2unix  ${c_header} >&/dev/null
-
 exec 1>&${saved_stdout}
+
 
 
 
@@ -639,8 +654,6 @@ function generate_source_file(){
 
     cat tempfile
     rm -f tempfile
-
-    exec 1>&${saved_stdout}
 
 }
 
@@ -1117,8 +1130,13 @@ cat fbfile
 extract_function_body "$(construct_pattern ${self} ~${self})"
 if [ -s fbfile ];
 then
-   echo "static void ${lowercase_self}_instance_fininalize(Object *obj)"
+   echo ""
+   echo "static void ${lowercase_self}_instance_finalize(Object *obj)"
+
    cat fbfile
+
+   # this will be used in generating TypeInfo struct later
+   has_destructor="yes"
 fi
 echo ""
 
@@ -1160,29 +1178,44 @@ parent_class_name=$(echo "${parent_class}" | tr -d 'a-z' | tr 'A-Z' 'a-z')
 echo "static void ${lowercase_self}_class_init(ObjectClass *oc, void *data)"
 echo "{"
 
+if [ -e omlist ] || [ -e pvflist ] || [ -e vflist ];
+then
+    echo "    ${self_class} *${self_class_name} = ${uppercase_self}_CLASS(oc);"
+fi
+
 if [ -e omlist ];
 then
     echo ""
-    echo "    ${self_class} *${self_class_name} = ${uppercase_self}_CLASS(oc);"
     add_bindings omlist ${self_class_name}
 fi
 
 if [ -e pvflist ];
 then
     echo ""
-    echo "    ${self_class} *${self_class_name} = ${uppercase_self}_CLASS(oc);"
     add_bindings pvflist ${self_class_name}
 fi
 
 
+# for non-pure virtual function, we often have no idea about whether it is
+# in parent class or in self class; but if we know the parent is class, we 
+# can sure that the virtual function should defined in self class.
 if [ -e vflist ];
 then
     echo ""
-    echo "    // The following bindings may not right, please check yourself."
-    echo "    ${parent_class} *${parent_class_name} = ${uppercase_parent}_CLASS(oc);"
-    add_bindings vflist ${parent_class_name}
-fi
 
+    if [[ ${parent} == "Object" ]];
+    then
+        add_bindings vflist ${self_class_name}
+    else
+        echo ">>> // some bindings may not right, please check yourself."
+        echo "    ${parent_class} *${parent_class_name} = ${uppercase_parent}_CLASS(oc);"
+        add_bindings vflist ${parent_class_name}
+        echo "<<<" 
+        add_bindings vflist ${self_class_name}
+        echo ">>>"
+    fi
+
+fi
 
 echo "}"
 
@@ -1195,7 +1228,12 @@ echo "    .instance_size = sizeof(${self}),"
 echo "    .abstract = false,"
 echo "    .class_size = sizeof(${self_class}),"
 echo "    .instance_init = ${lowercase_self}_instance_init," 
-echo "    .class_init = ${lowercase_self}_class_init" 
+echo "    .class_init = ${lowercase_self}_class_init," 
+
+if [[ ${has_destructor} == "yes" ]];
+then
+    echo "    .instance_finalize = ${lowercase_self}_instance_finalize" 
+fi
 echo "}"
 
 #type registration
@@ -1214,5 +1252,7 @@ echo "}"
 ###
 dos2unix ${c_source_file}>&/dev/null
 
-rm -f *file *list 
+exec 1>&${saved_stdout}
+echo "conversion is done."
 
+rm -f *file *list 

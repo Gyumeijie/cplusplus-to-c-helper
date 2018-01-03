@@ -513,6 +513,7 @@ sed -i \
     -e 's/ *, */,/g'  \
     -e 's/,/, /g' vffile omfile pvffile cffile
 
+
 # tackle non-virtual object method: remove constructor and destructor
 # here we just distiguish constructor and destructor between other non-virtual
 # object method.
@@ -565,10 +566,11 @@ echo -e "\n"
 ###
 echo "#define ${uppercase_self}_GET_CLASS(obj) \\
         OBJECT_GET_CLASS(${self_class}, obj, TYPE_${uppercase_self})" 
-
+echo ""
 echo "#define ${uppercase_self}_CLASS(klass) \\
         OBJECT_CLASS_CHECK(${self_class}, klass, TYPE_${uppercase_self})"
 
+echo ""
 echo "#define ${uppercase_self}(obj) \\
         OBJECT_CHECK(${self}, obj, TYPE_${uppercase_self})"
 
@@ -587,6 +589,7 @@ exec 1>&${saved_stdout}
 
 
 
+dos2unix  *dfile >&/dev/null
 
 
 
@@ -906,6 +909,7 @@ function is_duplicate(){
         echo "sorry, there are more than two functions with the same name"
         echo "dupicate files are the following:"
         echo "$(cat $1 | sort | uniq -c | sed '/1/d')"
+        
         exit 1
         # can't return true or false, numeric argument required
    fi
@@ -944,12 +948,12 @@ function append_function_body_to(){
     func_list_file=$1
     func_decl_file=$2 
 
-    i=1;
     while read func_name_line;
     do
         # pattern may contains spaces, so it is necessary to protect it with 
         # double quotes.
         extract_function_body "$(construct_pattern ${self} ${func_name_line})"
+
         if [ ! -s fbfile ];
         then
             echo -e "{\n    // this is automate genenrated by converter\n}" > fbfile
@@ -960,6 +964,7 @@ function append_function_body_to(){
         # so we must make sure that the substitution not taken place in both 
         # the comments and the function body, where a function will be matched. 
         insert_location=$(sed -n "/^[a-zA-Z_][a-zA-Z_\* ]\+$func_name_line(/=" ${func_decl_file})
+        
 
         # if the above regex expression is not comprehensive, the insert_location
         # will contain multiple number separated by newline; we should detect it
@@ -990,9 +995,6 @@ function append_function_body_to(){
             let insert_location=insert_location+1
 
         done < fbfile
-
-        # process the next function, according to it's name in func_list_file.
-        let i=i+1;
 
     done < ${func_list_file}
 }
@@ -1037,7 +1039,24 @@ function process_object_method(){
         
         while read func_name;
         do
-           func_header=$(sed -n "/$func_name/p" $1file)
+           # Warning: if the name of two functions are partially same, then 
+           # func_header is a mulit-line result, that will cause sed to report
+           # "unterminated `s' command error"; so we must make sure that
+           # $func_name is a integral function name, but not part of:
+           # ahead of function name should have a " " and a "(" should immediately
+           # follow the function name.
+           func_header=$(sed -n "/ $func_name(/p" $1file)
+
+           if [[ $func_header == *$'\n'* ]];
+           then
+               exec 1>&${saved_stdout}
+               
+               echo "sorry, it seem to at least two function with the same name \"$func_name\""
+               echo "please rectify them before continue converting!"
+
+               rm -f *file *list
+               exit 1
+           fi
 
            # until now, xxdfile contains comments and function declaration
            # so we must make sure the substitution not taken place in the comments.
@@ -1045,6 +1064,7 @@ function process_object_method(){
 
         done < $1list
     
+
         # Warning: for some pure virtual functions, there are no function body
         # in sources file, we must produce a default body for them.
         append_function_body_to $1list $1dfile

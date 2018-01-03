@@ -133,16 +133,19 @@ awk '
  }
 
  #TODO data mutiline comments should be with indentation
- function write_comments_to(file_to_write, is_multiline_comment){
+ function write_comments_to(file_to_write, is_multiline_comment, need_indentation){
 
     if (system("test -s "  comments) == 0){
         
-        if (is_multiline_comment) {
-            system("echo "  "\/\**"  " >> " file_to_write );
-            system("cat "  comments  " >> "  file_to_write);
-            # "*/" should has one space indentation
-            system("echo " "\" "  "*/"  "\" " " >> "  file_to_write);
+        leading = need_indentation==1 ? "    " : ""
 
+        if (is_multiline_comment) {
+            system("echo " "\"" leading "\""  "\/\**"  " >> " file_to_write );
+
+            system("cat "  comments  " >> "  file_to_write);
+
+            # "*/" should has one space indentation
+            system("echo " "\"" leading "\""  "\" "  "*/"  "\" " " >> "  file_to_write);
         } else {
             system("cat "  comments  " >> "  file_to_write);
         }
@@ -239,7 +242,10 @@ awk '
  # will matches. for "unsigned int *i;" we just match the "int *i" part, and 
  # that is enough.
  !/static/ && /[a-zA-Z_]+ \**[a-zA-Z_]+;/{
-    write_comments_to(object_variables, is_multiline_comment);
+
+    #comments for object variable alse need 4 spaces long indentation
+    system ("sed -i " "\"" "s/^/    /" "\" " comments);
+    write_comments_to(object_variables, is_multiline_comment, 1);
 
     # with 4 spaces indentation
     system("echo " "\"    "  $0  "\"" " >> " object_variables);
@@ -516,6 +522,7 @@ echo "    $parent_class parent_class;"
 
 if [ -s omfile ];
 then
+    echo " "
     cat omfile
 fi
 
@@ -1155,6 +1162,7 @@ echo "{"
 
 if [ -e omlist ];
 then
+    echo ""
     echo "    ${self_class} *${self_class_name} = ${uppercase_self}_CLASS(oc);"
     add_bindings omlist ${self_class_name}
 fi

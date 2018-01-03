@@ -123,8 +123,8 @@ lowercase_self=$(echo $self | tr 'A-Z' 'a-z')
 ### extract parts to corresponding files for later use
 ###
 
-touch hfile ovfile cvfile cffile vffile omfile cfile cmfile ccmfile omdfile \
-    cfdfile vfdfile fnsfile
+touch hfile ovfile cvfile cffile pvffile vffile omfile cfile cmfile ccmfile \
+    omdfile cfdfile pvfdfile vfdfile fnsfile
 
 awk '
 
@@ -278,7 +278,20 @@ awk '
     next
  }
  
- # extract virtual functions
+ # extract pure virtual functions
+ /virtual/ && /=/{
+    virtual_func_num++;
+
+    system("echo " "\"    "  $0  "\"" " >> " pure_virtual_funcs);
+
+    write_comments_to(pure_virtual_funcs_decl, is_multiline_comment);
+    system("echo " "\"    "  $0  "\"" " >> " pure_virtual_funcs_decl);
+    system("echo " " >> " pure_virtual_funcs_decl);
+
+    next
+ }
+
+ # extract not pure virtual functions
  /virtual/{
     virtual_func_num++;
 
@@ -340,6 +353,7 @@ awk '
   copyright=cfile comments=cmfile class_comments=ccmfile \
   class_funcs_decl=cfdfile virtual_funcs_decl=vfdfile \
   object_methods_decl=omdfile func_num_statics=fnsfile\
+  pure_virtual_funcs_decl=pvfdfile pure_virtual_funcs=pvffile\
   class_name="${self}"  formatted_file \
  
 # we can safely remove formatted_file.
@@ -487,7 +501,7 @@ sed -i \
     -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *= *0 *;/\1\2 (*\3)(Object *obj, \4;/g' \
     -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\) *const *;/\1\2 (*\3)(const Object *obj, \4;/g' \
     -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(/\1\2 (*\3)(Object *obj, /g'  \
-    -e 's/, \+void)/)/g' vffile omfile
+    -e 's/, \+void)/)/g' vffile omfile pvffile
 
 # tackle non-virtual object method: remove constructor and destructor
 # here we just distiguish constructor and destructor between other non-virtual
@@ -495,15 +509,28 @@ sed -i \
 sed -i -e "/${self}(/d" -e '/^$/d' omfile
 
 # tackle virtual object methods: remove virtual keyword.
-sed -i 's/virtual \+//g' vffile
+sed -i 's/virtual \+//g' vffile pvffile
 
 echo "typedef struct $self_class {"
-echo -e "    $parent_class parent_class;\n"
+echo "    $parent_class parent_class;"
 
-cat omfile
-echo ""
+if [ -s omfile ];
+then
+    cat omfile
+fi
 
-cat vffile
+if [ -s vffile ];
+then
+    echo " "
+    cat vffile
+fi
+
+if [ -s pvffile ];
+then
+    echo " "
+    cat pvffile
+    echo " "
+fi
 echo "} $self_class;"
 
 
@@ -761,6 +788,7 @@ then
         -e 's/public static \(.*\)/\1/g' cvfile
     
     
+    echo -e "\n"
     echo "///////////////////////////////////////////////////////////////////////////////"
     echo "//"
     echo "//                            class data"
@@ -867,7 +895,6 @@ function is_duplicate(){
 
 
 
-echo -e "\n"
 ###
 ### process class function 
 ### 
@@ -903,6 +930,10 @@ function append_function_body_to(){
         # pattern may contains spaces, so it is necessary to protect it with 
         # double quotes.
         extract_function_body "$(construct_pattern ${self} ${func_name_line})"
+        if [ ! -s fbfile ];
+        then
+            echo -e "{\n    // this is automate genenrated by converter\n}" > fbfile
+        fi
 
         # get the line number where line matchs the function name.
         # until now, xxdfile may contains some function body already appended,
@@ -950,6 +981,7 @@ append_function_body_to cflist  cffile
 
 if [ -s cffile ];
 then
+    echo -e "\n"
     echo "///////////////////////////////////////////////////////////////////////////////"
     echo "//"
     echo "//                            class  methods definition"
@@ -963,7 +995,6 @@ fi
 
 
 
-echo -e "\n"
 ###
 ### process object methods (virtual and normal object methods)
 ###
@@ -994,14 +1025,25 @@ function process_object_method(){
 
         done < $1list
     
+        # Warning: for some pure virtual functions, there are no function body
+        # in sources file, we must produce a default body for them.
         append_function_body_to $1list $1dfile
     
-        if [[ $1 == "om" ]];
-        then
-            method_kind="non-virtual"
-        else
-            method_kind="virtual"
-        fi
+        case "$1" in
+            "om")
+                 method_kind="non-virtual"
+                 ;;
+            "vf")
+                 method_kind="virtual"
+                 ;;
+            "pvf")
+                 method_kind="pure virtual"
+                 ;;
+             *)
+                 exec 1>&${saved_stdout}
+                 echo "unknown method kind"
+                 exit 1
+        esac
 
         echo -e "\n"
         echo "///////////////////////////////////////////////////////////////////////////////"
@@ -1019,8 +1061,8 @@ function process_object_method(){
 
 if [ -s omfile ];
 then
-    ####todo function with tab
     process_object_method "om"
+
     # check whether omlist has duplicate item
     is_duplicate omlist;
 fi
@@ -1034,14 +1076,21 @@ then
 fi
 
 
+if [ -s pvffile ];
+then
+    process_object_method "pvf"
+
+    # check whether vflist has duplicate item
+    is_duplicate pvflist;
+fi
 
 
 
-echo -e "\n"
 ###
 ###  process constructor and destructor 
 ###
 
+echo -e "\n"
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo "//"
 echo "//                   object constructor and destructor"
@@ -1049,7 +1098,7 @@ echo "//"
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo ""
 
-echo "// the following may be useful;if you don't use it, just delete." 
+echo "// the following may be useful if you don't need it, just delete." 
 echo "// ${self} *This = ${uppercase_self}(obj)"
 
 # constructor
@@ -1106,18 +1155,26 @@ echo "{"
 
 if [ -e omlist ];
 then
+    echo "    ${self_class} *${self_class_name} = ${uppercase_self}_CLASS(oc);"
     add_bindings omlist ${self_class_name}
-    echo "    ${self_class} *${self_class_name} = ${uppercase_self}_Class(oc);"
+fi
+
+if [ -e pvflist ];
+then
     echo ""
+    echo "    ${self_class} *${self_class_name} = ${uppercase_self}_CLASS(oc);"
+    add_bindings pvflist ${self_class_name}
 fi
 
 
 if [ -e vflist ];
 then
-    echo "    ${parent_class} *${parent_class_name} = ${uppercase_parent}_Class(oc);"
-    echo "    // This may not correct, please check yourself."
+    echo ""
+    echo "    // The following bindings may not right, please check yourself."
+    echo "    ${parent_class} *${parent_class_name} = ${uppercase_parent}_CLASS(oc);"
     add_bindings vflist ${parent_class_name}
 fi
+
 
 echo "}"
 
@@ -1149,5 +1206,5 @@ echo "}"
 ###
 dos2unix ${c_source_file}>&/dev/null
 
-#rm -f *file *list 
+rm -f *file *list 
 

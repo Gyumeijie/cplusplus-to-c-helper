@@ -387,6 +387,7 @@ exec {c_header_fd}>${c_header} 1>&${c_header_fd}
 
 
 
+
 ###
 ### emit copyright info
 ###
@@ -850,43 +851,53 @@ function extract_function_body(){
    touch fbfile
 
    # the main idea is finding the function which matchs a pattern first, then 
-   # we output the body to the func_body file, until we meet the function end
-   # tag "}".
-   awk '
-       BEGIN{
-           is_function_body = 0;
-       }
+   # we tag the start and end line number of the body in the func_body file,
+   # after that we can get a range which indicate the location of the function
+   # body we want extract.
+   range=$(awk '
+      BEGIN{
+          is_function_body = 0;
+          body_start = 0;
+          body_end = 0;
+      }
 
-       /^\/\//{
+      /^\/\//{
            next 
+      }
+
+      # find the function 
+      $0~pattern{ 
+          body_start= NR + 1;
+          is_function_body = 1; 
+          next
+      }
+
+      # assume the end of function "}" is at the begin of line, this can be
+      # guaranteed in preprocess phase or we can do ourselves.
+      /^\}/{
+          if (is_function_body == 0){
+              next
+          }else{ 
+              body_end = NR
+              exit 0
+          }
        }
 
-       # find the function 
-       $0~pattern{ 
-           system("echo " "\"{"  "\"" " >> " func_body);
-           is_function_body = 1; 
-           next
-       }
+      END{
+          print body_start, "/", body_end 
+      }
 
-       # assume the end of function "}" is at the begin of line, this can be
-       # guaranteed in preprocess phase or we can do ourselves.
-       /^\}/ {
-           if (is_function_body == 0){
-               next
-           }else{ 
-               system("echo " "\"}"  "\"" " >> " func_body);
-               exit 0
-           }
-        }
-
-        {
-            if (is_function_body == 1){ 
-                system("echo " "\""  $0  "\"" " >> " func_body);
-            }
-            next
-        }
-
-  ' pattern="$1" func_body=fbfile mixed_file 
+     ' pattern="$1" mixed_file)
+     
+     body_start=${range% /*}
+     body_end=${range#*/ }
+     
+     if [ $body_start != 0 ];
+     then
+         echo "{" > fbfile
+         # using this method, we can preserve special characters in line.
+         sed -n "${body_start},${body_end}p" mixed_file >> fbfile
+     fi
 }
 
 
@@ -911,7 +922,6 @@ function is_duplicate(){
         echo "$(cat $1 | sort | uniq -c | sed '/1/d')"
         
         exit 1
-        # can't return true or false, numeric argument required
    fi
 }
 
@@ -965,13 +975,12 @@ function append_function_body_to(){
         # the comments and the function body, where a function will be matched. 
         insert_location=$(sed -n "/^[a-zA-Z_][a-zA-Z_\* ]\+$func_name_line(/=" ${func_decl_file})
         
-
         # if the above regex expression is not comprehensive, the insert_location
         # will contain multiple number separated by newline; we should detect it
         # and come back to revise the regex expression.
         # by the way if a variable contains newline, like var="1\n2\n", we can 
         # use [[ $var == *'\n'* ]] to check.
-        if [[ $insert_location == *$'\n'* ]];
+        if [[ ${insert_location} == *$'\n'* ]];
         then
              exec 1>&${saved_stdout}
              echo "ambiguous insert_location in ${func_decl_file}:"
@@ -984,18 +993,15 @@ function append_function_body_to(){
              exit 1;
         fi 
 
-        IFS=''
-        # append function body in fbfile line by line below the corresponding
-        # function declaration line in func_decl_file.
-        while read func_decl_line;
-        do
-            sed -i "${insert_location}a\\\\$func_decl_line" ${func_decl_file}
-
-            # update the next line number to append function body line.
-            let insert_location=insert_location+1
-
-        done < fbfile
-
+        # save the upper part of ${func_decl_file}
+        sed -n "1,${insert_location}p" ${func_decl_file} > upper_part
+        # save the lower part of ${func_decl_file}
+        sed -n "$((insert_location+1)),\$p" ${func_decl_file} > lower_part
+        # concatenate the content of fbfile and lower_part respectively 
+        cat fbfile lower_part >> upper_part
+        # let upper_part be new ${func_decl_file}
+        mv upper_part ${func_decl_file}
+        
     done < ${func_list_file}
 }
 
@@ -1051,7 +1057,7 @@ function process_object_method(){
            then
                exec 1>&${saved_stdout}
                
-               echo "sorry, it seem to at least two function with the same name \"$func_name\""
+               echo "sorry, it seem to be at least two function with the same name \"$func_name\""
                echo "please rectify them before continue converting!"
 
                rm -f *file *list

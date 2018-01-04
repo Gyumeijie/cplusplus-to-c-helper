@@ -124,7 +124,7 @@ lowercase_self=$(echo $self | tr 'A-Z' 'a-z')
 ###
 
 touch hfile ovfile cvfile cffile pvffile vffile omfile cfile cmfile ccmfile \
-    omdfile cfdfile pvfdfile vfdfile fnsfile
+    omdfile cfdfile pvfdfile vfdfile fnsfile smfile
 
 awk '
 
@@ -324,6 +324,11 @@ awk '
     next
   }
  
+  # extract method contains class_name, maybe constructor, destructor or copy
+  # constructor and so on.
+  /[a-zA-Z_] *\(/ && $0 ~ class_name{
+      system("echo " "\""  $0  "\"" " >> " special_methods);
+  }
 
  # private access control
  /private *:/{
@@ -359,15 +364,13 @@ awk '
   class_funcs_decl=cfdfile virtual_funcs_decl=vfdfile \
   object_methods_decl=omdfile func_num_statics=fnsfile\
   pure_virtual_funcs_decl=pvfdfile pure_virtual_funcs=pvffile\
-  class_name="${self}"  formatted_file \
+  special_methods=smfile class_name="${self}"  formatted_file \
  
 # we can safely remove formatted_file.
 rm -f formatted_file
 
 # cat the fnsfile to show the number of function 
 # cat fnsfile
-
-
 
 
 ###############################################################################
@@ -466,6 +469,38 @@ then
 fi
 
 
+# process constructor with extra parameter
+sed -i -e "/^[a-zA-Z_]\+(.*${self}/d" -e "s/( *void *)/()/" smfile
+line_num=`sed -n "/^${self}(/=" smfile` 
+
+if [[ ${line_num} != '' ]];
+then 
+    exec 1>&${saved_stdout}
+
+    if [[ ${line_num} == *$'\n'* ]];
+    then
+      echo "detect multiple constructors"
+      exit 1
+    fi
+    
+    echo "detect non-trival constructor"
+    dos2unix smfile >&/dev/null
+    para_list=$(sed -n "s/^${self}(\(.*\)) *;/(Object *obj, \1)/p" smfile)
+
+    exec 1>&${c_header_fd}
+
+    echo -e "\n"
+    echo "///////////////////////////////////////////////////////////////////////////////"
+    echo "//"
+    echo "//                          object post initialization"
+    echo "//"
+    echo "///////////////////////////////////////////////////////////////////////////////"
+    echo ""
+    echo "${self}_post_initialization${para_list};"
+fi
+
+
+
 
 
 
@@ -480,9 +515,10 @@ echo "//"
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo ""
 echo "typedef struct $self {"
-echo -e "    $parent parent;\n"
+echo "    $parent parent;"
 if [ -s ovfile ];
 then
+    echo""
     cat ovfile
 fi
 echo "} $self;"
@@ -729,8 +765,9 @@ awk '
 # doing the following convertion
 dos2unix shfile>&/dev/null
 
-# add double quotes for included file, for process above the double quotes lost.
-sed -i 's/\(#include\) *\(.*\)/\1 \"\2\"/g' shfile
+# add double quotes for included file, for process above the double quotes lost;
+# but included file enclosed by <> don't need.
+sed -i 's/\(#include\) \+\([^\<]\+\)/\1 \"\2\"/g' shfile
 
 # update file name in copyright information 
 sed -i "s/${self}.cpp/${self}.c/g" shfile
@@ -744,7 +781,6 @@ then
 else  
     cat ${cplusplus_source_file} > mixed_file
 fi
-
 
 c_source_file=${self}.c
 rm -f ${c_source_file}
@@ -898,6 +934,8 @@ function extract_function_body(){
          # using this method, we can preserve special characters in line.
          sed -n "${body_start},${body_end}p" mixed_file >> fbfile
      fi
+
+     rm -f range
 }
 
 
@@ -1003,6 +1041,8 @@ function append_function_body_to(){
         mv upper_part ${func_decl_file}
         
     done < ${func_list_file}
+
+    rm -f lower_part
 }
 
 append_function_body_to cflist  cffile
@@ -1148,7 +1188,15 @@ echo "// the following may be useful if you don't need it, just delete."
 echo "// ${self} *This = ${uppercase_self}(obj)"
 
 # constructor
-echo "static void ${lowercase_self}_instance_init(Object *obj)"
+if [[ ${para_list} == '' ]];
+then
+    echo "static void ${lowercase_self}_instance_init(Object *obj)"
+else
+    # format parameter list in function header.
+    sed -i -e "s/ *, */,/" -e "s/,/, /" mixed_file
+    para_list=$(sed -n "s/${self}::${self}(\(.*\))\(.*\)/(Object *obj, \1)/p" mixed_file)
+    echo "${self}_post_initialization${para_list}"
+fi
 extract_function_body "$(construct_pattern ${self} ${self})"
 cat fbfile
 
@@ -1253,14 +1301,19 @@ echo "    .parent = TYPE_${uppercase_parent},"
 echo "    .instance_size = sizeof(${self}),"
 echo "    .abstract = false,"
 echo "    .class_size = sizeof(${self_class}),"
-echo "    .instance_init = ${lowercase_self}_instance_init," 
+
+if [[ ${para_list} == '' ]];
+then
+    echo "    .instance_init = ${lowercase_self}_instance_init," 
+fi
+
 echo "    .class_init = ${lowercase_self}_class_init," 
 
 if [[ ${has_destructor} == "yes" ]];
 then
     echo "    .instance_finalize = ${lowercase_self}_instance_finalize" 
 fi
-echo "}"
+echo "};"
 
 #type registration
 echo ""

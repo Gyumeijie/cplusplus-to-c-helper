@@ -793,6 +793,9 @@ exec {c_source_file_fd}>${c_source_file} 1>&${c_source_file_fd}
 # remove the class data initialization in source file, for them lost access
 # control information: we have know idea about which data has private, protected
 # or public access; and we have cvfile, which includes such information.
+# but before remove optional class data initialization, we should backup for latter
+# use.
+cp shfile _shfile
 sed -i '/::/d' shfile
 cat shfile
 
@@ -811,7 +814,7 @@ then
                         !/\/\// && !/\*/ && /=/{
                              print "yes"
                              exit 0
-                        }' shfile)
+                        }' _shfile)
     
     
     # if there are class variable initialization, then extract them and
@@ -823,7 +826,7 @@ then
     
         # extract class variable initialization to cvilist, in the form of 
         # "varname=init_valule".
-        sed -n 's/.*::\([a-zA-Z_]\+\) *= *\([0-9a-zA-Z_]\+\) *;/\1=\2/gp' shfile > cvilist
+        sed -n 's/.*::\([a-zA-Z_]\+\) *= *\([0-9a-zA-Z_]\+\) *;/\1=\2/gp' _shfile > cvilist
     
         # without doing conversion ";varname = init_value";
         # "varname = init_value;" is the answer.
@@ -1127,7 +1130,7 @@ function process_object_method(){
                  method_kind="non-virtual"
                  ;;
             "vf")
-                 method_kind="virtual"
+                 method_kind="non-pure virtual"
                  ;;
             "pvf")
                  method_kind="pure virtual"

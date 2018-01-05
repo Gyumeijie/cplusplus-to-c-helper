@@ -496,7 +496,7 @@ then
     echo "//"
     echo "///////////////////////////////////////////////////////////////////////////////"
     echo ""
-    echo "${self}_post_initialization${para_list};"
+    echo "void ${self}_post_initialization${para_list};"
 fi
 
 
@@ -657,6 +657,7 @@ function produce_function_header(){
         -e 's/^[\t ]\+//g'\
         -e 's/;//g' $1 
 
+    
 }
 
 
@@ -1067,6 +1068,12 @@ fi
 ### process object methods (virtual and normal object methods)
 ###
 
+# add staic keyword at the begining of the function decalaration for object
+# methods.
+sed -i\
+    -e 's/^[\t ]\+//g'\
+    -e 's/^\(.\+\)/static \1/g' omfile vffile pvffile
+
 # for object methods, we don't place their comments into ${self_class} struct
 # in .h file, because doing this will make struct unreadable; so we place those
 # comments in .c file; these comments with their corresponding method declaration
@@ -1195,7 +1202,7 @@ else
     # format parameter list in function header.
     sed -i -e "s/ *, */,/" -e "s/,/, /" mixed_file
     para_list=$(sed -n "s/${self}::${self}(\(.*\))\(.*\)/(Object *obj, \1)/p" mixed_file)
-    echo "${self}_post_initialization${para_list}"
+    echo "void ${self}_post_initialization${para_list}"
 fi
 extract_function_body "$(construct_pattern ${self} ${self})"
 cat fbfile

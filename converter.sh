@@ -287,8 +287,7 @@ awk '
 
     write_comments_to(class_funcs_decl, is_multiline_comment);
     system("echo " "\"" ac  "\" "  "\""  $0  "\""  " >> " class_funcs_decl);
-    system("echo "  ">> " class_funcs_decl);
-
+    system("echo "  " >> " class_funcs_decl);
 
     next
  }
@@ -324,10 +323,13 @@ awk '
  /[a-zA-Z_] *\(/ && $0 !~ class_pattern{
     object_method_num++;
 
-    system("echo " "\"    "  $0  "\"" " >> " object_methods);
+    ac = get_access_constrol_description(access_control);
+
+    system("echo " "\"" ac  "\" "  "\""  $0  "\""  " >> " object_methods);
+    system("echo " " >> " object_methods);
 
     write_comments_to(object_methods_decl, is_multiline_comment);
-    system("echo " "\"    "  $0  "\"" " >> " object_methods_decl);
+    system("echo " "\"" ac  "\" "  "\""  $0  "\""  " >> " object_methods_decl);
     system("echo " " >> " object_methods_decl);
 
     next
@@ -392,6 +394,13 @@ rm -f formatted_file
 #
 ###############################################################################
 
+# example: function(para1,  para2,para3)-->function(para1, para2, para3)
+function format_function_parameter_list(){
+    sed -i \
+        -e 's/ *, */,/g'  \
+        -e 's/,/, /g' $1
+}
+
 #set c header name
 c_header=${self}.h
 
@@ -454,38 +463,6 @@ echo "void ${lowercase_self}_register(void);"
 
 
 
-###
-###  process class method declaration
-###
-if [ -s cfdfile ];
-then
-   echo -e "\n"
-   echo "///////////////////////////////////////////////////////////////////////////////"
-   echo "//"
-   echo "//                            class methods declaration"
-   echo "//"
-   echo "///////////////////////////////////////////////////////////////////////////////"
-   echo ""
-   # tackle file declaration according access control keyword: if it is "private"
-   # or "protected" then just remove keyword and leave "static" as it is.Otherwise
-   # remove both access control keyword "public" and "static".
-   #TODO maybe there are more case to be dealt with
-   sed -i \
-       -e 's/private \(.*\)/\1/g' \
-       -e 's/protected \(.*\)/\1/g' \
-       -e 's/public static \(.*\)/\1/g' \
-       -e 's/public inline static \(.*\)/inline \1/g'\
-       -e "s/\([a-zA-Z_]\+\)(/${self}_\1(/g" cfdfile cffile
-
-   
-   cat cfdfile
-fi
-
-
-
-
-
-
 echo -e "\n"
 ###
 ### define the object struct
@@ -520,23 +497,16 @@ echo -e "\n"
 # tackle non-const function
 # tackle void: (void)--->([const]Object *obj, void)--->([const]Object *obj)
 sed -i \
-    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *const *= *0 *;/\1\2 (*\3)(const Object *obj, \4);/g' \
-    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *= *0 *;/\1\2 (*\3)(Object *obj, \4);/g' \
-    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *const *;/\1\2 (*\3)(const Object *obj, \4);/g' \
-    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(/\1\2 (*\3)(Object *obj, /g'  \
-    -e 's/, \+void)/)/g' vffile omfile pvffile
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *const *= *0 *;/\1\2 (*\3)(const void *obj, \4);/g' \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *= *0 *;/\1\2 (*\3)(void *obj, \4);/g' \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *const *;/\1\2 (*\3)(const void *obj, \4);/g' \
+    -e 's/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(/\1\2 (*\3)(void *obj, /g'  \
+    -e 's/, \+void)/)/g' vffile pvffile
 
-
-sed -i \
-    -e 's/\(.*\)) *;/\1);/g'  \
-    -e 's/ *, */,/g'  \
-    -e 's/,/, /g' vffile omfile pvffile cffile
-
-
-# tackle non-virtual object method: remove constructor and destructor
-# here we just distiguish constructor and destructor between other non-virtual
-# object method.
-sed -i -e "/${self}(/d" -e '/^$/d' omfile
+format_function_parameter_list vffile
+format_function_parameter_list vfdfile
+format_function_parameter_list pvffile
+format_function_parameter_list pvfdfile
 
 # tackle virtual object methods: remove virtual keyword.
 sed -i 's/virtual \+//g' vffile pvffile
@@ -544,11 +514,6 @@ sed -i 's/virtual \+//g' vffile pvffile
 echo "typedef struct $self_class {"
 echo "    $parent_class parent_class;"
 
-if [ -s omfile ];
-then
-    echo " "
-    cat omfile
-fi
 
 # for non-pure virtual function, we often have no idea about whether it is
 # in parent class or in self class; but if we know the parent is class, we 
@@ -579,10 +544,12 @@ echo "} $self_class;"
 
 
 
-echo -e "\n"
 ###
 ### emit the macros
 ###
+
+echo -e "\n"
+
 echo "#define ${uppercase_self}_GET_CLASS(obj) \\
         OBJECT_GET_CLASS(${self_class}, obj, TYPE_${uppercase_self})" 
 echo ""
@@ -594,6 +561,11 @@ echo "#define ${uppercase_self}(obj) \\
         OBJECT_CHECK(${self}, obj, TYPE_${uppercase_self})"
 
 
+
+
+###
+### class-specific new function
+###
 
 # process constructor with extra parameter(s): define a class-specific
 # new function
@@ -619,24 +591,92 @@ then
 
 fi
 
-echo -e "\n"
 # add class-specific new function
+echo -e "\n"
 echo "${self}* ${lowercase_self}_new(${para_list:-void});"
 
 
 
-echo -e "\n"
+
+
+###
+###  process class method declaration
+###
+
+if [ -s cfdfile ];
+then
+   echo -e "\n"
+   echo "///////////////////////////////////////////////////////////////////////////////"
+   echo "//"
+   echo "//                            class method(s) declaration"
+   echo "//"
+   echo "///////////////////////////////////////////////////////////////////////////////"
+   echo ""
+   #TODO maybe there are more case to be dealt with
+   sed -i \
+       -e 's/private \(.*\)/\1/g' \
+       -e 's/protected \(.*\)/\1/g' \
+       -e 's/public static \(.*\)/\1/g' \
+       -e 's/public inline static \(.*\)/inline \1/g'\
+       -e "s/\([a-zA-Z_]\+\)(/${self}_\1(/g" cfdfile cffile
+
+       format_function_parameter_list cffile
+       format_function_parameter_list cfdfile
+
+   
+   cat cfdfile
+fi
+
+
+
+
+
+###
+###  process non-virtual member methods declaration
+###
+if [ -s omdfile ];
+then
+   echo -e "\n"
+   echo "///////////////////////////////////////////////////////////////////////////////"
+   echo "//"
+   echo "//                 non-virtual member method(s) declaration"
+   echo "//"
+   echo "///////////////////////////////////////////////////////////////////////////////"
+   echo ""
+   #TODO maybe there are more case to be dealt with
+   sed -i \
+       -e 's/private \(.*\)/static \1/g' \
+       -e 's/protected \(.*\)/\1/g' \
+       -e 's/public \(.*\)/\1/g' \
+       -e 's/public inline \(.*\)/inline \1/g'\
+       -e "s/\([a-zA-Z_]\+\)(/${self}_\1(/g" omdfile omfile
+
+   sed -i \
+       -e "s/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *;/\1\2 \3(${self} *This, \4);/g"  \
+       -e "s/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *const *;/\1\2 \3(const ${self} *This, \4);/g" \
+       -e "s/, \+void)/)/g" omdfile omfile
+
+       format_function_parameter_list omfile
+       format_function_parameter_list omdfile
+
+   cat omdfile
+fi
+
+
+
+
 ###
 ###  postprocess for ${self}.h file
 ###
 
+echo  ""
 echo "#endif"
 dos2unix  ${c_header} >&/dev/null
 exec 1>&${saved_stdout}
 
-
-
 dos2unix  *dfile >&/dev/null
+
+
 
 
 
@@ -981,21 +1021,17 @@ function is_duplicate(){
 
 
 
+
 ###
-### process class function 
+### process non-virtual function 
 ### 
 
-# generate a list of class function name prefixed without ${self}_
-sed -n 's/[a-zA-Z_\* ]\+ \([a-zA-Z_]\+\)(.*/\1/gp' cffile > cflist
-sed -i "s/${self}_\([a-zA-Z_]\+\)/\1/g" cflist
+function generate_name_list_for_non_virtual_function(){
 
-# check whether cflist has duplicate item
-is_duplicate cflist;
-
-
-# remove ; in file including class function declaraton
-# function_header(); ---> function_header()
-sed -i 's/;//g' cffile
+    # generate a list of class function name prefixed without ${self}_
+    sed -n 's/[a-zA-Z_\* ]\+ \([a-zA-Z_]\+\)(.*/\1/gp' $1file > $1list
+    sed -i "s/${self}_\([a-zA-Z_]\+\)/\1/g" $1list
+}
 
 function append_function_body_to(){
 
@@ -1059,14 +1095,31 @@ function append_function_body_to(){
     rm -f lower_part
 }
 
-append_function_body_to cflist  cffile
+
+function process_non_virtual_method(){
+
+    # generate a list of class function name prefixed without ${self}_
+    generate_name_list_for_non_virtual_function $1
+
+    # check whether cflist has duplicate item
+    is_duplicate $1list;
+
+    # remove ; in file including class function declaraton
+    # function_header(); ---> function_header()
+    sed -i 's/;//g' $1file
+
+    append_function_body_to $1list  $1file
+}
+
 
 if [ -s cffile ];
 then
+    process_non_virtual_method "cf"
+
     echo -e "\n"
     echo "///////////////////////////////////////////////////////////////////////////////"
     echo "//"
-    echo "//                            class  methods definition"
+    echo "//                            class  method(s) definition"
     echo "//"
     echo "///////////////////////////////////////////////////////////////////////////////"
     echo ""
@@ -1074,25 +1127,41 @@ then
 fi
 
 
+if [ -s omfile ];
+then
+
+    process_non_virtual_method "om"
+
+    echo -e "\n"
+    echo "///////////////////////////////////////////////////////////////////////////////"
+    echo "//"
+    echo "//                  non-virtual member method(s) definition"
+    echo "//"
+    echo "///////////////////////////////////////////////////////////////////////////////"
+    echo ""
+    cat omfile
+fi
+
+
 
 
 
 ###
-### process object methods (virtual and normal object methods)
+### process virtual methods
 ###
 
-# add staic keyword at the begining of the function decalaration for object
+# add staic keyword at the begining of the function decalaration for virtual
 # methods.
 sed -i\
     -e 's/^[\t ]\+//g'\
     -e 's/^\(.\+\)/static \1/g' omfile vffile pvffile
 
-# for object methods, we don't place their comments into ${self_class} struct
+# for virtual object methods, we don't place their comments into ${self_class} struct
 # in .h file, because doing this will make struct unreadable; so we place those
 # comments in .c file; these comments with their corresponding method declaration
-# are kept in xxdfile, like omdfile or vfdfile. By the way omfile and vffile are
+# are kept in xxdfile, like pvfdfile or vfdfile. By the way pvffile and vffile are
 # just keep methods declaration, not with comments.
-function process_object_method(){
+function process_virtual_method(){
 
     if [ -s $1dfile ];
     then
@@ -1136,9 +1205,6 @@ function process_object_method(){
         append_function_body_to $1list $1dfile
     
         case "$1" in
-            "om")
-                 method_kind="non-virtual"
-                 ;;
             "vf")
                  method_kind="non-pure virtual"
                  ;;
@@ -1154,7 +1220,7 @@ function process_object_method(){
         echo -e "\n"
         echo "///////////////////////////////////////////////////////////////////////////////"
         echo "//"
-        echo "//                    ${method_kind} object methods definition"
+        echo "//                    ${method_kind}  method(s) definition"
         echo "//"
         echo "///////////////////////////////////////////////////////////////////////////////"
         echo ""
@@ -1165,17 +1231,10 @@ function process_object_method(){
     fi
 }
 
-if [ -s omfile ];
-then
-    process_object_method "om"
-
-    # check whether omlist has duplicate item
-    is_duplicate omlist;
-fi
 
 if [ -s vffile ];
 then
-    process_object_method "vf"
+    process_virtual_method "vf"
 
     # check whether vflist has duplicate item
     is_duplicate vflist;
@@ -1184,11 +1243,12 @@ fi
 
 if [ -s pvffile ];
 then
-    process_object_method "pvf"
+    process_virtual_method "pvf"
 
     # check whether vflist has duplicate item
     is_duplicate pvflist;
 fi
+
 
 
 
@@ -1311,16 +1371,11 @@ parent_class_name=$(echo "${parent_class}" | tr -d 'a-z' | tr 'A-Z' 'a-z')
 echo "static void ${lowercase_self}_class_init(ObjectClass *oc, void *data)"
 echo "{"
 
-if [ -e omlist ] || [ -e pvflist ] || [ -e vflist ];
+if [ -e pvflist ] || [ -e vflist ];
 then
     echo "    ${self_class} *${self_class_name} = ${uppercase_self}_CLASS(oc);"
 fi
 
-if [ -e omlist ];
-then
-    echo ""
-    add_bindings omlist ${self_class_name}
-fi
 
 if [ -e pvflist ];
 then

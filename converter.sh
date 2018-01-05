@@ -318,7 +318,7 @@ awk '
 
  # extract normal object methods, not include copy, constructor, destructor
  # funcnton
- /[a-zA-Z_] *\(/ && $0 !~ class_name{
+ /[a-zA-Z_] *\(/ && $0 !~ class_pattern{
     object_method_num++;
 
     system("echo " "\"    "  $0  "\"" " >> " object_methods);
@@ -330,9 +330,10 @@ awk '
     next
   }
  
-  # extract method contains class_name, maybe constructor, destructor or copy
+  # extract method contains class_pattern, maybe constructor, destructor or copy
   # constructor and so on.
-  /[a-zA-Z_] *\(/ && $0 ~ class_name{
+  # "^[^a-zA-Z_]*${self}", if self is "TestSuite", then runTestSuite do not match.
+  /[a-zA-Z_] *\(/ && $0 ~ class_pattern{
       system("echo " "\""  $0  "\"" " >> " special_methods);
   }
 
@@ -370,13 +371,16 @@ awk '
   class_funcs_decl=cfdfile virtual_funcs_decl=vfdfile \
   object_methods_decl=omdfile func_num_statics=fnsfile\
   pure_virtual_funcs_decl=pvfdfile pure_virtual_funcs=pvffile\
-  special_methods=smfile class_name="${self}"  formatted_file \
- 
+  special_methods=smfile class_pattern="^[^a-zA-Z_]*${self}"  formatted_file \
+
 # we can safely remove formatted_file.
 rm -f formatted_file
 
 # cat the fnsfile to show the number of function 
 # cat fnsfile
+
+
+
 
 
 ###############################################################################

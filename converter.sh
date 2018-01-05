@@ -102,8 +102,14 @@ awk_stdout=$(awk '
  ' formatted_file)
 
 self=${awk_stdout%/*}
-parent=${awk_stdout#*/}
+if [[ ${#self} == 0 ]];
+then
+     echo "Waring: no class in header file"
+     rm -f *file
+     exit 1;
+fi
 
+parent=${awk_stdout#*/}
 if [[ ${#parent} == 0 ]];
 then
     parent="Object";
@@ -469,37 +475,6 @@ then
 fi
 
 
-# process constructor with extra parameter
-sed -i -e "/^[a-zA-Z_]\+(.*${self}/d" -e "s/( *void *)/()/" smfile
-line_num=`sed -n "/^${self}(/=" smfile` 
-
-if [[ ${line_num} != '' ]];
-then 
-    exec 1>&${saved_stdout}
-
-    if [[ ${line_num} == *$'\n'* ]];
-    then
-      echo "detect multiple constructors"
-      exit 1
-    fi
-    
-    echo "detect non-trival constructor"
-    dos2unix smfile >&/dev/null
-    para_list=$(sed -n "s/^${self}(\(.*\)) *;/(Object *obj, \1)/p" smfile)
-
-    exec 1>&${c_header_fd}
-
-    echo -e "\n"
-    echo "///////////////////////////////////////////////////////////////////////////////"
-    echo "//"
-    echo "//                          object post initialization"
-    echo "//"
-    echo "///////////////////////////////////////////////////////////////////////////////"
-    echo ""
-    echo "void ${self}_post_initialization${para_list};"
-fi
-
-
 
 
 
@@ -612,6 +587,34 @@ echo "#define ${uppercase_self}(obj) \\
         OBJECT_CHECK(${self}, obj, TYPE_${uppercase_self})"
 
 
+
+# process constructor with extra parameter(s): define a class-specific
+# new function
+sed -i -e "/^[a-zA-Z_]\+(.*${self}/d" -e "s/( *void *)/()/" smfile
+line_num=`sed -n "/^${self}(.\+)/=" smfile` 
+
+if [[ ${line_num} != '' ]];
+then 
+    exec 1>&${saved_stdout}
+
+    if [[ ${line_num} == *$'\n'* ]];
+    then
+      echo "detect multiple constructors"
+      exit 1
+    fi
+    
+    echo "detect non-trival constructor"
+
+    dos2unix smfile >&/dev/null
+    para_list=$(sed -n "s/^${self}(\(.*\)) *;/\1/p" smfile)
+
+    exec 1>&${c_header_fd}
+
+fi
+
+echo -e "\n"
+# add class-specific new function
+echo "${self}* ${lowercase_self}_new(${para_list:-void});"
 
 
 
@@ -1204,11 +1207,50 @@ then
 else
     # format parameter list in function header.
     sed -i -e "s/ *, */,/" -e "s/,/, /" mixed_file
-    para_list=$(sed -n "s/${self}::${self}(\(.*\))\(.*\)/(Object *obj, \1)/p" mixed_file)
-    echo "void ${self}_post_initialization${para_list}"
+    para_list=$(sed -n "s/${self}::${self}(\(.*\))\(.*\)/\1/p" mixed_file)
+
+    echo "static void ${lowercase_self}_post_initialization(Object* obj, ${para_list})"
 fi
 extract_function_body "$(construct_pattern ${self} ${self})"
 cat fbfile
+
+
+# class-specific new function
+echo ""
+echo "${self}* ${lowercase_self}_new(${para_list:-void})"
+echo "{"
+
+if [[ ${para_list} == '' ]];
+then
+    echo "    return (${self}*)object_new(TYPE_${uppercase_self});"
+else
+     echo "${para_list}" | tr ',' '\n' > formal_para
+     sed -i\
+         -e 's/\([a-zA-Z_\*]\+\) \+\([a-zA-Z_]\)/\2/g'\
+         -e 's/\([a-zA-Z_]\+\) \+\**\([a-zA-Z_]\+\)/\2/g'\
+         -e 's/^[ ]\+//g' formal_para 
+
+     list=''
+     while read line;
+     do
+        if [[ $list == '' ]];
+        then 
+            list="$line"; 
+        else 
+            list="$list, $line"; 
+        fi;
+     done < formal_para
+
+     rm -f formal_para
+
+     echo "   Object *obj = object_new(TYPE_${uppercase_self});"
+     echo "   ${lowercase_self}_post_initialization(obj, ${list});"
+     echo ""
+     echo "   return (${self}*)obj;"
+fi
+
+echo "}"
+
 
 # destructor, this is optional
 extract_function_body "$(construct_pattern ${self} ~${self})"
@@ -1309,7 +1351,14 @@ echo "static const TypeInfo ${lowercase_self}_type_info = {"
 echo "    .name = TYPE_${uppercase_self},"
 echo "    .parent = TYPE_${uppercase_parent},"
 echo "    .instance_size = sizeof(${self}),"
-echo "    .abstract = false,"
+
+if [ -s pvffile ];
+then
+    echo "    .abstract = true,"
+else
+    echo "    .abstract = false,"
+fi
+
 echo "    .class_size = sizeof(${self_class}),"
 
 if [[ ${para_list} == '' ]];

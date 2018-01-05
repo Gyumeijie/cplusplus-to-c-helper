@@ -66,9 +66,12 @@ sed -i 's/()/(void)/g' formatted_file
 # we shuold make sure that the substitution not taken place in comments, for 
 # previous preprocess, leading whitespace(s) of all lines in .h file are deleted
 # so we can use ^[^\/] to guarantee that.
+# notice that we don't use [a-zA-Z_]\+ to match variable but use [a-zA-Z_][^ ]
+# because chances are the variable is a array, if we use the former one, we can't 
+# deal with this case.
 sed -i \
-    -e 's/\(^[^\/][a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_]\+\) *;/\1 \2\3;/g'\
-    -e 's/\(^[^\/][a-zA-Z_][^()\* ]\+\)\( \+\)\(\**\)\([a-zA-Z_]\+\) *;/\1 \3\4;/g'\
+    -e 's/\(^[^\/][a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_][^ ]\+\) *;/\1 \2\3;/g'\
+    -e 's/\(^[^\/][a-zA-Z_][^()\* ]\+\)\( \+\)\(\**\)\([a-zA-Z_][^ ]\+\) *;/\1 \3\4;/g'\
     formatted_file
 
 # remove whitespace(s) between function name and (
@@ -247,7 +250,7 @@ awk '
  # way, we can not use "[a-zA-Z_ ]+" for line contains "func_name()  const;"
  # will matches. for "unsigned int *i;" we just match the "int *i" part, and 
  # that is enough.
- !/static/ && /[a-zA-Z_]+ \**[a-zA-Z_]+;/{
+ !/static/ && /[a-zA-Z_]+ \**[a-zA-Z_\[\]]+;/{
 
     #comments for object variable alse need 4 spaces long indentation
     system ("sed -i " "\"" "s/^/    /" "\" " comments);

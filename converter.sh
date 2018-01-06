@@ -70,8 +70,8 @@ sed -i 's/()/(void)/g' formatted_file
 # because chances are the variable is a array, if we use the former one, we can't 
 # deal with this case.
 sed -i \
-    -e 's/\(^[^\/][a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_][^ ]\+\) *;/\1 \2\3;/g'\
-    -e 's/\(^[^\/][a-zA-Z_][^()\* ]\+\)\( \+\)\(\**\)\([a-zA-Z_][^ ]\+\) *;/\1 \3\4;/g'\
+    -e 's/\(^[^\/][a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_][^ ]*\) *;/\1 \2\3;/g'\
+    -e 's/\(^[^\/][a-zA-Z_][^()\* ]\+\)\( \+\)\(\**\)\([a-zA-Z_][^ ]*\) *;/\1 \3\4;/g'\
     formatted_file
 
 # remove whitespace(s) between function name and (
@@ -1264,19 +1264,23 @@ echo "//"
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo ""
 
-echo "// the following may be useful if you don't need it, just delete." 
-echo "// ${self} *This = ${uppercase_self}(obj)"
-
 # constructor
 if [[ ${para_list} == '' ]];
 then
+    echo "// the following may be useful if you don't need it, just delete." 
+    echo "// ${self} *This = ${uppercase_self}(obj)"
+
     echo "static void ${lowercase_self}_instance_init(Object *obj)"
 else
     # format parameter list in function header.
     sed -i -e "s/ *, */,/" -e "s/,/, /" mixed_file
+
     para_list=$(sed -n "s/${self}::${self}(\(.*\))\(.*\)/\1/p" mixed_file)
 
-    echo "static void ${lowercase_self}_post_initialization(Object* obj, ${para_list})"
+    # format parameter list in function header.
+    para_list=$(sed 's/\([a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_][^ ]*\)\(,\?\)/\1 \2\3\4/g' <<< ${para_list})
+
+    echo "static void ${lowercase_self}_post_initialization(${self} *This, ${para_list})"
 fi
 extract_function_body "$(construct_pattern ${self} ${self})"
 cat fbfile
@@ -1311,7 +1315,7 @@ else
      rm -f formal_para
 
      echo "   Object *obj = object_new(TYPE_${uppercase_self});"
-     echo "   ${lowercase_self}_post_initialization(obj, ${list});"
+     echo "   ${lowercase_self}_post_initialization((${self}*)obj, ${list});"
      echo ""
      echo "   return (${self}*)obj;"
 fi

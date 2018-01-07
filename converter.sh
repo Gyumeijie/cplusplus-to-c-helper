@@ -1013,6 +1013,7 @@ function is_duplicate(){
         echo "dupicate files are the following:"
         echo "$(cat $1 | sort | uniq -c | sed '/1/d')"
         
+        rm -f *file *list
         exit 1
    fi
 }
@@ -1275,10 +1276,10 @@ else
     # format parameter list in function header.
     sed -i -e "s/ *, */,/" -e "s/,/, /" mixed_file
 
-    para_list=$(sed -n "s/${self}::${self}(\(.*\))\(.*\)/\1/p" mixed_file)
+    # para_list=$(sed -n "s/${self}::${self}(\(.*\))\(.*\)/\1/p" mixed_file)
 
     # format parameter list in function header.
-    para_list=$(sed 's/\([a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_][^ ]*\)\(,\?\)/\1 \2\3\4/g' <<< ${para_list})
+    # para_list=$(sed 's/\([a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_][^ ]*\)\(,\?\)/\1 \2\3\4/g' <<< ${para_list})
 
     echo "static void ${lowercase_self}_post_initialization(${self} *This, ${para_list})"
 fi

@@ -387,7 +387,6 @@ rm -f formatted_file
 
 
 
-
 ###############################################################################
 #
 #                             generate .h file
@@ -630,7 +629,6 @@ fi
 
 
 
-
 ###
 ###  process non-virtual member methods declaration
 ###
@@ -651,13 +649,17 @@ then
        -e 's/public inline \(.*\)/inline \1/g'\
        -e "s/\([a-zA-Z_]\+\)(/${self}_\1(/g" omdfile omfile
 
+   # after concatenate class name with method name, the whole name may contain number
+   # for example:
+   # void DC_DataItem16TmWord_setDataItem(DC_RawDataItem* pDataItem);
+   # void DC_DataItem16TmWord_setDataIte m(DC_DataItem16TmWord *This, DC_RawDataItem* pDataItem);
    sed -i \
-       -e "s/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *;/\1\2 \3(${self} *This, \4);/g"  \
-       -e "s/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_]\+\)(\(.*\)) *const *;/\1\2 \3(const ${self} *This, \4);/g" \
+       -e "s/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_][a-zA-Z_0-9]*\)(\(.*\)) *;/\1\2 \3(${self} *This, \4);/g"  \
+       -e "s/\([a-zA-Z_]\+\) *\(\**\) *\([a-zA-Z_][a-zA-Z_0-9]*\)(\(.*\)) *const *;/\1\2 \3(const ${self} *This, \4);/g" \
        -e "s/, \+void)/)/g" omdfile omfile
 
-       format_function_parameter_list omfile
-       format_function_parameter_list omdfile
+   format_function_parameter_list omfile
+   format_function_parameter_list omdfile
 
    cat omdfile
 fi
@@ -982,6 +984,7 @@ function extract_function_body(){
      body_start=${range% /*}
      body_end=${range#*/ }
      
+     echo "$range $1">> range
      if [ $body_start != 0 ];
      then
          echo "{" > fbfile
@@ -989,7 +992,7 @@ function extract_function_body(){
          sed -n "${body_start},${body_end}p" mixed_file >> fbfile
      fi
 
-     rm -f range
+     unset range
 }
 
 
@@ -1062,7 +1065,9 @@ function append_function_body_to(){
         # until now, xxdfile may contains some function body already appended,
         # so we must make sure that the substitution not taken place in both 
         # the comments and the function body, where a function will be matched. 
-        insert_location=$(sed -n "/^[a-zA-Z_][a-zA-Z_\* ]\+$func_name_line(/=" ${func_decl_file})
+        # Waring: to prevent partially match of function name, only several'_' or 
+        # ' ' are allowed.
+        insert_location=$(sed -n "/^[a-zA-Z_][a-zA-Z_\* ]\+[_ ]\+$func_name_line(/=" ${func_decl_file})
         
         # if the above regex expression is not comprehensive, the insert_location
         # will contain multiple number separated by newline; we should detect it

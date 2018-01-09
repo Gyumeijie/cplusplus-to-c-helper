@@ -456,7 +456,7 @@ fi
 
 echo "#define TYPE_${uppercase_self} \"${lowercase_self}\""
 echo ""
-echo "void ${lowercase_self}_register(void);"
+echo "void ${self}_register(void);"
 
 
 
@@ -472,14 +472,14 @@ echo "//                            class and struct"
 echo "//"
 echo "///////////////////////////////////////////////////////////////////////////////"
 echo ""
-echo "typedef struct $self {"
+echo "struct $self {"
 echo "    $parent parent;"
 if [ -s ovfile ];
 then
     echo""
     cat ovfile
 fi
-echo "} $self;"
+echo "};"
 
 
 
@@ -510,7 +510,7 @@ format_function_parameter_list pvfdfile
 # tackle virtual object methods: remove virtual keyword.
 sed -i 's/virtual \+//g' vffile pvffile
 
-echo "typedef struct $self_class {"
+echo "struct $self_class {"
 echo "    $parent_class parent_class;"
 
 
@@ -537,7 +537,7 @@ then
     cat pvffile
     echo " "
 fi
-echo "} $self_class;"
+echo "};"
 
 
 
@@ -592,7 +592,7 @@ fi
 
 # add class-specific new function
 echo -e "\n"
-echo "${self}* ${lowercase_self}_new(${para_list:-void});"
+echo "${self}* ${self}_new(${para_list:-void});"
 
 
 
@@ -1276,7 +1276,7 @@ then
     echo "// the following may be useful if you don't need it, just delete." 
     echo "// ${self} *This = ${uppercase_self}(obj)"
 
-    echo "static void ${lowercase_self}_instance_init(Object *obj)"
+    echo "static void instance_init(Object *obj)"
 else
     # format parameter list in function header.
     sed -i -e "s/ *, */,/" -e "s/,/, /" mixed_file
@@ -1286,7 +1286,7 @@ else
     # format parameter list in function header.
     # para_list=$(sed 's/\([a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_][^ ]*\)\(,\?\)/\1 \2\3\4/g' <<< ${para_list})
 
-    echo "static void ${lowercase_self}_post_initialization(${self} *This, ${para_list})"
+    echo "static void post_init(${self} *This, ${para_list})"
 fi
 extract_function_body "$(construct_pattern ${self} ${self})"
 cat fbfile
@@ -1294,7 +1294,7 @@ cat fbfile
 
 # class-specific new function
 echo ""
-echo "${self}* ${lowercase_self}_new(${para_list:-void})"
+echo "${self}* ${self}_new(${para_list:-void})"
 echo "{"
 
 if [[ ${para_list} == '' ]];
@@ -1321,7 +1321,7 @@ else
      rm -f formal_para
 
      echo "   Object *obj = object_new(TYPE_${uppercase_self});"
-     echo "   ${lowercase_self}_post_initialization((${self}*)obj, ${list});"
+     echo "   post_init((${self}*)obj, ${list});"
      echo ""
      echo "   return (${self}*)obj;"
 fi
@@ -1334,7 +1334,7 @@ extract_function_body "$(construct_pattern ${self} ~${self})"
 if [ -s fbfile ];
 then
    echo ""
-   echo "static void ${lowercase_self}_instance_finalize(Object *obj)"
+   echo "static void instance_finalize(Object *obj)"
 
    cat fbfile
 
@@ -1378,7 +1378,7 @@ self_class_name=$(echo "${self_class}" | tr -d 'a-z' | tr 'A-Z' 'a-z')
 parent_class_name=$(echo "${parent_class}" | tr -d 'a-z' | tr 'A-Z' 'a-z')
 
 # class init
-echo "static void ${lowercase_self}_class_init(ObjectClass *oc, void *data)"
+echo "static void class_init(ObjectClass *oc, void *data)"
 echo "{"
 
 if [ -e pvflist ] || [ -e vflist ];
@@ -1395,8 +1395,8 @@ fi
 
 
 # for non-pure virtual function, we often have no idea about whether it is
-# in parent class or in self class; but if we know the parent is class, we 
-# can sure that the virtual function should defined in self class.
+# in parent class or in self class; but if we know the parent is Objectclass,
+# we can sure that the virtual function should defined in self class.
 if [ -e vflist ];
 then
     echo ""
@@ -1419,7 +1419,7 @@ echo "}"
 
 # type information
 echo ""
-echo "static const TypeInfo ${lowercase_self}_type_info = {"
+echo "static const TypeInfo type_info = {"
 echo "    .name = TYPE_${uppercase_self},"
 echo "    .parent = TYPE_${uppercase_parent},"
 echo "    .instance_size = sizeof(${self}),"
@@ -1435,22 +1435,22 @@ echo "    .class_size = sizeof(${self_class}),"
 
 if [[ ${para_list} == '' ]];
 then
-    echo "    .instance_init = ${lowercase_self}_instance_init," 
+    echo "    .instance_init = instance_init," 
 fi
 
-echo "    .class_init = ${lowercase_self}_class_init," 
+echo "    .class_init = class_init," 
 
 if [[ ${has_destructor} == "yes" ]];
 then
-    echo "    .instance_finalize = ${lowercase_self}_instance_finalize" 
+    echo "    .instance_finalize = instance_finalize" 
 fi
 echo "};"
 
 #type registration
 echo ""
-echo "void ${lowercase_self}_register(void)"
+echo "void ${self}_register(void)"
 echo "{"
-echo "    type_register_static(&${lowercase_self}_type_info);"
+echo "    type_register_static(&type_info);"
 echo "}"
 
 

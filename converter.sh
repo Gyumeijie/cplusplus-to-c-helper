@@ -376,7 +376,7 @@ awk '
   class_funcs_decl=cfdfile virtual_funcs_decl=vfdfile \
   object_methods_decl=omdfile func_num_statics=fnsfile\
   pure_virtual_funcs_decl=pvfdfile pure_virtual_funcs=pvffile\
-  special_methods=smfile class_pattern="^[^a-zA-Z_]*${self}"  formatted_file \
+  special_methods=smfile class_pattern="^[^a-zA-Z_]*${self} *\("  formatted_file \
 
 # we can safely remove formatted_file.
 rm -f formatted_file

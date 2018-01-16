@@ -70,8 +70,8 @@ sed -i 's/()/(void)/g' formatted_file
 # because chances are the variable is a array, if we use the former one, we can't 
 # deal with this case.
 sed -i \
-    -e 's/\(^[^\/][a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_][^ ]*\) *;/\1 \2\3;/g'\
-    -e 's/\(^[^\/][a-zA-Z_][^()\* ]\+\)\( \+\)\(\**\)\([a-zA-Z_][^ ]*\) *;/\1 \3\4;/g'\
+    -e 's/\(^[^\/][a-zA-Z_][^()\*]\+\)\(\**\) \+\([a-zA-Z_][^ (]*\) *;/\1 \2\3;/g'\
+    -e 's/\(^[^\/][a-zA-Z_][^()\* ]\+\)\( \+\)\(\**\)\([a-zA-Z_][^ (]*\) *;/\1 \3\4;/g'\
     formatted_file
 
 # remove whitespace(s) between function name and (

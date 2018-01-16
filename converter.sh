@@ -250,7 +250,7 @@ awk '
  # way, we can not use "[a-zA-Z_ ]+" for line contains "func_name()  const;"
  # will matches. for "unsigned int *i;" we just match the "int *i" part, and 
  # that is enough.
- !/static/ && /[a-zA-Z_]+ \**[a-zA-Z_\[\]]+;/{
+ !/static/ && /[a-zA-Z_0-9]+ \**[a-zA-Z_0-9\[\]]+;/{
 
     #comments for object variable alse need 4 spaces long indentation
     system ("sed -i " "\"" "s/^/    /" "\" " comments);
@@ -262,7 +262,9 @@ awk '
  }
 
  # extract class variables
- /static/ && /[a-zA-Z_]+ \**[a-zA-Z_]+;/{
+ # identifier in cplusplus file is not start with number, so we can just use
+ # the following regexp to match identifier.
+ /static/ && /[a-zA-Z_0-9]+ \**[a-zA-Z_0-9]+;/{
     write_comments_to(class_variables, is_multiline_comment);
 
     ac = get_access_constrol_description(access_control);
@@ -320,7 +322,7 @@ awk '
 
  # extract normal object methods, not include copy, constructor, destructor
  # funcnton
- /[a-zA-Z_] *\(/ && $0 !~ class_pattern{
+ /[a-zA-Z_0-9] *\(/ && $0 !~ class_pattern{
     object_method_num++;
 
     ac = get_access_constrol_description(access_control);
@@ -383,6 +385,7 @@ rm -f formatted_file
 
 # cat the fnsfile to show the number of function 
 # cat fnsfile
+
 
 
 

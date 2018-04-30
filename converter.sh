@@ -1468,4 +1468,4 @@ dos2unix ${c_source_file}>&/dev/null
 exec 1>&${saved_stdout}
 echo "conversion is done."
 
-rm -f *file *list 
+rm -f *file *list range

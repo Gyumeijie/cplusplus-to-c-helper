@@ -1,5 +1,5 @@
 # cplusplus-to-c-converter
-This is a simple bash script to help converting code from c++ to c, whose object model is based on qemu object model.
+This is a simple bash script to help convert code from c++ to c, whose object model is based on qemu object model.
 
 # usage
 - download the repository

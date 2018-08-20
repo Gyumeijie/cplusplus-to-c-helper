@@ -307,7 +307,7 @@ awk '
     next
  }
 
- # extract not pure virtual functions
+ # extract  non-pure virtual functions
  /virtual/{
     virtual_func_num++;
 
